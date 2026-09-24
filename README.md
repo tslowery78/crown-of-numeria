@@ -23,6 +23,9 @@ Problems are generated for **Bluebonnet Learning Grade 2 (Modules 1–8)** and *
 
 ## Launch on the Quest
 
+**Step-by-step guide for parents: [QUEST_SETUP.md](QUEST_SETUP.md)** (first-time setup, everyday play, controls, troubleshooting).
+
+
 The game is hosted at **https://tslowery78.github.io/crown-of-numeria/**
 
 Set it up once for each player: in the Quest browser, open that player's link and bookmark it (⋮ → Bookmark). Put the player's real name after `player=`:
