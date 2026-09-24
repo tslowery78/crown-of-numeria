@@ -191,7 +191,7 @@ function makeSign(text, { w = 2.4, h = 0.5, bg = '#3b2412', fg = '#ffe9a8', size
 // ------------------------------------------------------------ puzzle panel
 const PW = 1024, PH = 1280;
 class Panel {
-  constructor(game, { title, count, onSolved, doneText = 'Unlocked!', width = 0.8 }) {
+  constructor(game, { title, count, onSolved, doneText = 'Unlocked!', width = 0.8, defer = false }) {
     Object.assign(this, { game, title, count, onSolved, doneText });
     this.w = width; this.h = width * PH / PW;
     this.solved = 0; this.input = ''; this.wrong = 0; this.msg = ''; this.msgColor = '#fff';
@@ -201,8 +201,9 @@ class Panel {
     this.tex = new THREE.CanvasTexture(this.canvas); this.tex.colorSpace = THREE.SRGBColorSpace; this.tex.anisotropy = 8;
     this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, width * PH / PW), new THREE.MeshBasicMaterial({ map: this.tex, transparent: true, toneMapped: false }));
     this.mesh.userData.panel = this;
-    this.newProblem();
+    if (defer) this.draw(); else this.newProblem();
   }
+  activate() { if (!this.problem && this.state === 'solving') this.newProblem(); }
   newProblem() {
     this.problem = this.game.source.next();
     this.input = ''; this.wrong = 0; this.msg = ''; this.firstTry = true;
@@ -212,7 +213,7 @@ class Panel {
     const b = [], g4 = this.game.opts.grade === 4;
     b.push({ id: 'read', label: 'Read', x: 600, y: 18, w: 190, h: 76, kind: 'tool' });
     b.push({ id: 'hint', label: 'Hint', x: 810, y: 18, w: 190, h: 76, kind: 'tool' });
-    if (this.state !== 'solving') return b;
+    if (this.state !== 'solving' || !this.problem) return b;
     const p = this.problem;
     if (p.choices) {
       const short = p.choices.every((c) => c.length <= 2), n = p.choices.length;
@@ -225,8 +226,8 @@ class Panel {
       }
       return b;
     }
-    const rows = g4
-      ? [['1', '2', '3', '⌫'], ['4', '5', '6', '/'], ['7', '8', '9', '.'], ['C', '0', 'OK']]
+    const rows = g4 || p.homework
+      ? [['1', '2', '3', '⌫'], ['4', '5', '6', '/'], ['7', '8', '9', '.'], ['±', '0', 'OK']]
       : [['1', '2', '3', '⌫'], ['4', '5', '6', 'C'], ['7', '8', '9', '0'], ['OK']];
     const kw = 222, kh = 105, gap = 15, x0 = (PW - (4 * kw + 3 * gap)) / 2, y0 = 790;
     rows.forEach((row, r) => {
@@ -240,7 +241,7 @@ class Panel {
     return b;
   }
   draw() {
-    const ctx = this.ctx, p = this.problem;
+    const ctx = this.ctx, p = this.problem || { text: 'Reach this floor to begin.' };
     this.buttons = this.layoutButtons();
     ctx.clearRect(0, 0, PW, PH);
     // parchment board with gold frame
@@ -299,14 +300,15 @@ class Panel {
   press(uv) { const id = this.buttonAt(uv); if (id) this.pressKey(id); }
   pressKey(k) {
     const now = performance.now();
-    if (this.state !== 'solving') return;
+    if (this.state !== 'solving' || !this.problem) return;
     if (k === 'read') { speak(this.problem.text); this.game.sfx.click(); return; }
     if (k === 'hint') { this.msg = `Hint: ${this.problem.hint}`; this.msgColor = '#ffd86b'; this.firstTry = false; this.game.sfx.click(); this.draw(); return; }
     if (now < this.busyUntil) return;
     this.game.sfx.click();
     if (k.startsWith('choice:')) return this.submit(k.slice(7));
     if (this.problem.choices) return;
-    if (/^[0-9./]$/.test(k)) { if (this.input.length < 12) this.input += k; }
+    if (/^[0-9./]$/.test(k)) { if (this.input.length < 20) this.input += k; }
+    else if (k === '±' || k === '-') { this.input = this.input.startsWith('-') ? this.input.slice(1) : this.input.length < 20 ? '-' + this.input : this.input; }
     else if (k === '⌫') this.input = this.input.slice(0, -1);
     else if (k === 'C') this.input = '';
     else if (k === 'OK') return this.submit(this.input);
@@ -356,6 +358,7 @@ function insidePoly(x, z, pts) {
 // Largest axis-aligned rectangle that fits inside the Guardian polygon.
 // Tries a grid of centres; returns { cx, cz, w, d } in metres.
 export function fitRoom(pts) {
+  if (!Array.isArray(pts) || pts.length < 3 || pts.some((p) => !Number.isFinite(p.x) || !Number.isFinite(p.z))) throw new Error('No usable Guardian boundary was returned. Choose a measured play-area size.');
   const xs = pts.map((p) => p.x), zs = pts.map((p) => p.z);
   const [x0, x1, z0, z1] = [Math.min(...xs), Math.max(...xs), Math.min(...zs), Math.max(...zs)];
   const fits = (cx, cz, a, b) => {
@@ -393,7 +396,7 @@ export class Game {
     this.anims = []; this.particles = []; this.extraTips = [];
     this.initRenderer();
     this.initControls();
-    this.renderer.setAnimationLoop(() => this.frame());
+    this.renderer.setAnimationLoop((time, frame) => this.frame(frame));
   }
 
   presetSize() { const n = parseFloat(this.opts.roomSize); return Number.isFinite(n) ? n : 2.5; }
@@ -407,25 +410,57 @@ export class Game {
 
   async enterVR() {
     const session = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking'] });
-    let type = 'local-floor', w = this.presetSize(), d = w, cx = 0, cz = 0;
-    if (this.opts.roomSize === 'auto') {
-      try {
-        const space = await session.requestReferenceSpace('bounded-floor');
+    this.xrBoundsSpace = null; this.xrReset = false;
+    try {
+      let type = 'local-floor', w = this.presetSize(), d = w, cx = 0, cz = 0;
+      if (this.opts.roomSize === 'auto') {
+        let space;
+        try { space = await session.requestReferenceSpace('bounded-floor'); }
+        catch { throw new Error('Guardian bounds are unavailable. Choose a measured play-area size.'); }
         const pts = space.boundsGeometry;
-        if (pts && pts.length >= 3) {
-          const fit = fitRoom([...pts].map((p) => ({ x: p.x, z: p.z })));
-          if (fit.w > 1 && fit.d > 1) { type = 'bounded-floor'; w = fit.w - 2 * EDGE_MARGIN; d = fit.d - 2 * EDGE_MARGIN; cx = fit.cx; cz = fit.cz; }
-        }
-      } catch { /* no Guardian bounds: use the preset size around the start spot */ }
+        const fit = fitRoom(Array.from(pts || [], (p) => ({ x: p.x, z: p.z })));
+        w = fit.w - 2 * EDGE_MARGIN; d = fit.d - 2 * EDGE_MARGIN;
+        if (w < ROOM_MIN || d < ROOM_MIN) throw new Error('The reported Guardian area is too small for the castle. Choose a measured play-area size or enlarge the clear space.');
+        type = 'bounded-floor'; cx = fit.cx; cz = fit.cz;
+        this.xrBoundsSpace = space;
+      }
+      this.fitInfo = { type, w, d };
+      this.renderer.xr.setReferenceSpaceType(type);
+      this.buildWorld(w, d);
+      this.rig.rotation.set(0, 0, 0); this.rig.position.set(-cx, 0, -cz);
+      this.xrCalibrating = type === 'local-floor';
+      this.camera.position.set(0, 0, 0); this.camera.rotation.set(0, 0, 0);
+      await this.renderer.xr.setSession(session);
+      // Use the exact bounded space whose geometry was fitted.
+      if (this.xrBoundsSpace) this.renderer.xr.setReferenceSpace(this.xrBoundsSpace);
+      const reference = this.renderer.xr.getReferenceSpace();
+      const reset = () => { this.xrReset = true; session.end().catch(() => {}); };
+      reference.addEventListener('reset', reset);
+      session.addEventListener('end', () => {
+        reference.removeEventListener('reset', reset);
+        this.xrCalibrating = false; this.xrBoundsSpace = null;
+        this.camera.position.set(0, 1.3, 0); this.rig.position.x = this.rig.position.z = 0; this.rig.rotation.set(0, 0, 0);
+        if (this.xrReset) this.onResetVR?.(); else this.onExitVR?.();
+      });
+      this.startAudio();
+    } catch (e) {
+      this.xrCalibrating = false; this.xrBoundsSpace = null;
+      await session.end().catch(() => {});
+      throw e;
     }
-    this.fitInfo = { type, w, d };
-    this.renderer.xr.setReferenceSpaceType(type);
-    this.buildWorld(w, d);
-    this.rig.position.set(-cx, 0, -cz);
-    this.camera.position.set(0, 0, 0); this.camera.rotation.set(0, 0, 0);
-    await this.renderer.xr.setSession(session);
-    this.startAudio();
-    session.addEventListener('end', () => { this.camera.position.set(0, 1.3, 0); this.rig.position.x = this.rig.position.z = 0; this.onExitVR?.(); });
+  }
+
+  calibrateXR(pose) {
+    const { position, orientation } = pose.transform;
+    const q = new THREE.Quaternion(orientation.x, orientation.y, orientation.z, orientation.w);
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(q);
+    if (Math.hypot(forward.x, forward.z) < 0.1) return false; // wait until looking roughly forward
+    const yaw = Math.atan2(-forward.x, -forward.z);
+    this.rig.rotation.y = -yaw;
+    const start = new THREE.Vector3(position.x, 0, position.z).applyAxisAngle(new THREE.Vector3(0, 1, 0), -yaw);
+    this.rig.position.x = -start.x; this.rig.position.z = -start.z;
+    this.rig.updateMatrixWorld(true); this.xrCalibrating = false;
+    return true;
   }
 
   // ---------------------------------------------------------- setup
@@ -457,7 +492,8 @@ export class Game {
   }
 
   buildWorld(W, D) {
-    W = clamp(W, ROOM_MIN, ROOM_MAX); D = clamp(D, ROOM_MIN, ROOM_MAX);
+    if (!Number.isFinite(W) || !Number.isFinite(D) || W < ROOM_MIN || D < ROOM_MIN) throw new Error('The play area is too small for the castle.');
+    W = Math.min(W, ROOM_MAX); D = Math.min(D, ROOM_MAX);
     this.W = W; this.D = D;
     if (this.world) { this.scene.remove(this.world); this.world.traverse((o) => { o.geometry?.dispose(); }); }
     this.world = new THREE.Group(); this.scene.add(this.world);
@@ -578,6 +614,7 @@ export class Game {
     for (let i = 0; i < TOP; i++) this.makeLock(i);
     for (let i = 0; i < TOP; i++) this.makeChest(i);
     this.makeFinale();
+    this.locks[0].panel.activate();
     this.makeLift();
     this.makeWelcome();
     this.makeMirror(0, new THREE.Vector3(hw - 0.02, 0, 0), -Math.PI / 2);
@@ -880,7 +917,7 @@ export class Game {
       g.position.set((k - (n - 1) / 2) * 0.16, y0 + 2.6, -hd + 0.06); this.world.add(g); gems.push(g);
     }
     const lock = { i, pad, gems, open: false };
-    const panel = new Panel(this, { title: `Magic Lock ${i + 1}`, count: n, doneText: 'Unlocked!', onSolved: () => this.unlock(lock) });
+    const panel = new Panel(this, { title: `Magic Lock ${i + 1}`, count: n, defer: true, doneText: 'Unlocked!', onSolved: () => this.unlock(lock) });
     panel.mesh.position.set(0, y0 + this.panelH, -hd + 0.03);
     panel.floor = i; panel.wallMounted = true;
     const orig = panel.update.bind(panel);
@@ -962,6 +999,7 @@ export class Game {
       this.rig.position.y = y;
       if (L.t >= 1) {
         this.level++; this.guideText = null;
+        (this.level === TOP ? this.finalChest.panel : this.locks[this.level].panel).activate();
         this.lift = { state: this.level >= TOP ? 'done' : 'locked', dwell: 0, t: 0 };
         this.rig.position.y = fy(this.level);
         this.setGuide(null); this.placeLights(); this.updateHud();
@@ -1086,7 +1124,7 @@ export class Game {
     chest.group.position.set(0, y0, hd - 0.45);
     chest.group.rotation.y = Math.PI;
     chest.q.visible = false;
-    const panel = new Panel(this, { title: 'The Crown of Numeria', count: this.opts.perDoor + 1, doneText: 'VICTORY!', onSolved: () => this.openChest(chest) });
+    const panel = new Panel(this, { title: 'The Crown of Numeria', count: this.opts.perDoor + 1, defer: true, doneText: 'VICTORY!', onSolved: () => this.openChest(chest) });
     panel.mesh.position.set(0, y0 + this.panelH, -hd + 0.2);
     panel.floor = TOP; panel.wallMounted = true;
     this.world.add(panel.mesh); this.panels.push(panel);
@@ -1119,7 +1157,7 @@ export class Game {
     for (let k = 0; k < 10; k++) setTimeout(() => { const a = Math.random() * Math.PI * 2, r = 12 + Math.random() * 12, p = new THREE.Vector3(Math.cos(a) * r, y0 + 8 + Math.random() * 8, Math.sin(a) * r); this.burst(p, 120, 0.25, 9); this.audio.boom(p); }, 600 + k * 450);
     const s = this.stats;
     this.saveProgress();
-    const vp = new Panel(this, { title: 'Tower Conquered!', count: 0 });
+    const vp = new Panel(this, { title: 'Tower Conquered!', count: 0, defer: true });
     vp.state = 'victory';
     vp.draw = () => {
       const ctx = vp.ctx;
@@ -1267,7 +1305,7 @@ export class Game {
     });
     window.addEventListener('keydown', (e) => {
       const k = e.key;
-      if (/^[0-9./]$/.test(k) || k === 'Backspace' || k === 'Enter') {
+      if (/^[0-9./-]$/.test(k) || k === 'Backspace' || k === 'Enter') {
         const p = this.activePanel();
         if (p) { p.pressKey(k === 'Backspace' ? '⌫' : k === 'Enter' ? 'OK' : k); e.preventDefault(); }
         return;
@@ -1450,10 +1488,16 @@ export class Game {
   }
 
   // ---------------------------------------------------------- frame loop
-  frame() {
+  frame(xrFrame) {
     const dt = Math.min(this.clock.getDelta(), 0.05), t = this.clock.elapsedTime;
     if (!this.world) { this.renderer.render(this.scene, this.camera); return; }
     const xr = this.renderer.xr.isPresenting;
+    if (xr && this.xrReset) return;
+    if (xr && this.xrCalibrating) {
+      const pose = xrFrame?.getViewerPose(this.renderer.xr.getReferenceSpace());
+      if (!pose || !this.calibrateXR(pose)) return;
+    }
+    if (xr) { this.rig.updateMatrixWorld(true); this.renderer.xr.updateCamera(this.camera); }
     if (!xr) {
       const f = (this.keys.has('w') || this.keys.has('arrowup') ? 1 : 0) - (this.keys.has('s') || this.keys.has('arrowdown') ? 1 : 0);
       const s = (this.keys.has('d') ? 1 : 0) - (this.keys.has('a') ? 1 : 0);
@@ -1511,7 +1555,7 @@ export class Game {
     let nearWin = 9, win = null;
     for (const w of this.windows) { if (Math.abs(w.y0 - fy(this.level)) > 0.1) continue; const d = w.pos.distanceTo(head); if (d < nearWin) { nearWin = d; win = w; } }
     const roof = this.level === TOP;
-    this.audio.setWind(roof ? 0.8 : clamp(1 - nearWin / 2.5, 0, 1) * 0.6 + (this.level / TOP) * 0.2);
+    this.audio.setWind(roof ? 0.8 : clamp(1 - nearWin / 2.5, 0, 1) * 0.6 + (this.level / TOP) * 0.2, win?.pos || head.clone().add(new THREE.Vector3(0, 2, 0)));
     if (win && Math.random() < 0.06) this.audio.chirp(win.pos.clone().addScaledVector(win.out, 6).add(new THREE.Vector3((Math.random() - 0.5) * 6, 2, 0)));
     if (roof && Math.random() < 0.05) this.audio.chirp(head.clone().add(new THREE.Vector3((Math.random() - 0.5) * 20, 5, (Math.random() - 0.5) * 20)));
     const torches = this.torches.filter((tc) => tc.floor === this.level);

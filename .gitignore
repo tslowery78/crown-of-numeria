@@ -1,3 +1,4 @@
 .cert/
 .DS_Store
 TASK.md
+node_modules/

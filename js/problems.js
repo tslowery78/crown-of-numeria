@@ -186,21 +186,39 @@ export const MODULES = { 2: G2, 4: G4 };
 
 // ------------------------------------------------------------ checking
 export function parseValue(s) {
-  s = String(s).replace(/[,\s$¢°]/g, '');
-  if (!s) return NaN;
-  if (s.includes('/')) {
-    const [n, d, extra] = s.split('/');
-    if (extra !== undefined || n === '' || d === '' || Number(d) === 0) return NaN;
-    return Number(n) / Number(d);
+  s = String(s).trim().replace(/−/g, '-').replace(/[,$¢°]/g, '').trim();
+  const mixed = s.match(/^([+-]?)(\d+)\s+(\d+)\s*\/\s*(\d+)$/);
+  if (mixed) {
+    const [, sign, whole, n, d] = mixed;
+    if (Number(d) === 0 || Number(n) >= Number(d)) return NaN;
+    return (sign === '-' ? -1 : 1) * (Number(whole) + Number(n) / Number(d));
   }
-  return Number(s);
+  const frac = s.match(/^([+-]?\d+)\s*\/\s*(\d+)$/);
+  if (frac) return Number(frac[2]) ? Number(frac[1]) / Number(frac[2]) : NaN;
+  if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(s)) return NaN;
+  const value = Number(s);
+  return Number.isFinite(value) ? value : NaN;
+}
+
+// A numeric homework answer must have an equivalent the on-screen keypad can enter.
+export function keypadAnswer(answer) {
+  const value = parseValue(answer);
+  if (!Number.isFinite(value)) return null;
+  let s = String(answer).trim().replace(/−/g, '-').replace(/[,$¢°]/g, '').trim();
+  const mixed = s.match(/^([+-]?)(\d+)\s+(\d+)\s*\/\s*(\d+)$/);
+  if (mixed) {
+    const [, sign, whole, n, d] = mixed;
+    s = `${sign === '-' ? '-' : ''}${Number(whole) * Number(d) + Number(n)}/${d}`;
+  }
+  s = s.replace(/\s/g, '').replace(/^\+/, '');
+  return s.length <= 20 && /^[\d./-]+$/.test(s) ? s : null;
 }
 
 export function isCorrect(problem, input) {
   if (problem.choices) return input === problem.answer;
   const want = parseValue(problem.answer), got = parseValue(input);
-  if (Number.isNaN(want) || Number.isNaN(got)) return String(input).trim().toLowerCase() === String(problem.answer).trim().toLowerCase();
-  return Math.abs(want - got) < 1e-9;
+  if (!Number.isFinite(want) || !Number.isFinite(got)) return false;
+  return Number.isFinite(want) && Number.isFinite(got) && Math.abs(want - got) <= 4 * Number.EPSILON * Math.max(Math.abs(want), Math.abs(got), Number.MIN_VALUE);
 }
 
 // Spoken version of a problem (for the read-aloud button).
@@ -233,8 +251,10 @@ export function parseHomework(src, grade) {
     if (parts[2]) {
       p.choices = parts[2].split(';').map((s) => s.trim()).filter(Boolean);
       if (!p.choices.includes(p.answer)) p.choices.push(p.answer);
-    } else if (Number.isNaN(parseValue(p.answer))) {
-      errors.push(`line ${i + 1}: answer "${p.answer}" is not a number, so list choices after a second |`); return;
+    } else {
+      const numeric = keypadAnswer(p.answer);
+      if (numeric === null) { errors.push(`line ${i + 1}: use a finite number, fraction or mixed number up to 20 characters, or list choices after a second |`); return; }
+      p.answer = numeric;
     }
     out.push(p);
   });
@@ -247,7 +267,8 @@ export class ProblemSource {
     this.gens = MODULES[grade].filter((m) => moduleIds.includes(m.id)).flatMap((m) => m.gens);
     if (!this.gens.length) this.gens = MODULES[grade].flatMap((m) => m.gens);
     this.homework = homework.slice();
-    this.homeworkOnly = homeworkOnly && homework.length > 0;
+    if (homeworkOnly && !homework.length) throw new Error('Add at least one valid homework problem before choosing homework only.');
+    this.homeworkOnly = homeworkOnly;
     this.hwIndex = 0;
     this.seen = new Set();
     this.lastGen = -1;

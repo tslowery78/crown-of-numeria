@@ -175,7 +175,18 @@ export function avatarPreview(canvas) {
   cam.position.set(0, 0.8, -2.9); cam.lookAt(0, 0.7, 0); cam.layers.enable(MIRROR_LAYER);
   scene.add(new THREE.HemisphereLight('#ffffff', '#886666', 2.2)); const dl = new THREE.DirectionalLight('#fff', 2); dl.position.set(1, 2, -2); scene.add(dl);
   let av = null, rig = null, angle = 0, t = 0;
-  const set = (cfg) => { if (av) scene.remove(av.root); av = buildAvatar(cfg); rig = new AvatarRig(av); scene.add(av.root); };
+  const disposeAvatar = () => {
+    if (!av) return;
+    const resources = new Set();
+    av.root.traverse((o) => {
+      if (o.geometry) resources.add(o.geometry);
+      for (const m of o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : []) {
+        resources.add(m); for (const v of Object.values(m)) if (v?.isTexture) resources.add(v);
+      }
+    });
+    scene.remove(av.root); resources.forEach((resource) => resource.dispose()); av = null; rig = null;
+  };
+  const set = (cfg) => { disposeAvatar(); av = buildAvatar(cfg); rig = new AvatarRig(av); scene.add(av.root); };
   const q = new THREE.Quaternion(), headPos = new THREE.Vector3(0, 1.17, 0);
   r.setAnimationLoop(() => {
     t += 0.016; angle = Math.sin(t * 0.6) * 0.8;
@@ -185,5 +196,5 @@ export function avatarPreview(canvas) {
     rig?.update(headPos, q, 0, [headPos.clone().addScaledVector(right, -0.25).add(new THREE.Vector3(0, -0.55, 0)).addScaledVector(fwd, 0.1), headPos.clone().addScaledVector(right, 0.3).add(new THREE.Vector3(0, 0.05 + wave, 0)).addScaledVector(fwd, 0.1)], 1, t);
     r.render(scene, cam);
   });
-  return { set };
+  return { set, dispose() { r.setAnimationLoop(null); disposeAvatar(); r.dispose(); } };
 }

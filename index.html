@@ -94,7 +94,7 @@
 
   <section>
     <h2>Homework problems (optional)</h2>
-    <p class="note">One problem per line: <b>question | answer</b>. For word answers add choices: <b>Is 17 even or odd? | odd | even; odd</b>. These come first, then the game makes more practice problems.</p>
+    <p class="note">One problem per line: <b>question | answer</b>. For word answers add choices: <b>Is 17 even or odd? | odd | even; odd</b>. These come first, then the game makes more practice problems. Mixed numbers such as <b>1 1/2</b> work too; enter <b>3/2</b> or <b>1.5</b> in the game. Use <b>±</b> for negative answers.</p>
     <textarea id="homework" spellcheck="false" placeholder="245 + 367 = ? | 612&#10;Is 17 even or odd? | odd | even; odd"></textarea>
     <div id="hwStatus"></div>
     <label><input type="checkbox" id="hwOnly"> Only use my homework problems (repeat them)</label>
@@ -114,7 +114,7 @@
     <label>Music
       <select id="music"><option value="0">Off</option><option value="0.35" selected>Soft</option><option value="0.6">Medium</option><option value="1">Loud</option></select>
     </label>
-    <p class="note">Each castle floor is one room this size, centred where she is standing when she presses Enter. The wall she is facing becomes the Magic Lock wall. Pick a size a little smaller than the clear space inside the Guardian.</p>
+    <p class="note">For a measured size, stand in the middle and face forward until the castle appears. That spot becomes the room centre, with the Magic Lock ahead. Pick a size a little smaller than the clear space inside the Guardian. Automatic fit uses the Guardian's centre and direction; if its bounds are unavailable or too small, choose a measured size.</p>
   </section>
 
   <button class="go" id="vrBtn" disabled>Checking for VR…</button>
@@ -173,7 +173,8 @@ function checkHomework() {
   const txt = $('homework').value;
   if (!txt.trim() || !grade) { $('hwStatus').innerHTML = ''; return; }
   const { problems, errors } = parseHomework(txt, grade);
-  $('hwStatus').innerHTML = `<div class="ok">${problems.length} homework problem${problems.length === 1 ? '' : 's'} ready for grade ${grade}.</div>` + (errors.length ? `<div class="err">${errors.join('\n')}</div>` : '');
+  $('hwStatus').textContent = `${problems.length} homework problem${problems.length === 1 ? '' : 's'} ready for grade ${grade}.` + (errors.length ? `\n${errors.join('\n')}` : '');
+  $('hwStatus').className = errors.length ? 'err' : 'ok';
 }
 function loadProfile(name) {
   const s = store.get(profileKey(name), null);
@@ -199,22 +200,27 @@ function collect() {
   if (!grade) { alert('Pick 2nd grade or 4th grade first.'); return null; }
   const moduleIds = [...document.querySelectorAll('#mods input:checked')].map((i) => i.value);
   if (!moduleIds.length && !$('hwOnly').checked) { alert('Pick at least one module.'); return null; }
+  const { problems: hw, errors } = parseHomework($('homework').value, grade);
+  if (errors.length) { alert(`Please fix the homework before starting:\n${errors.join('\n')}`); return null; }
+  if ($('hwOnly').checked && !hw.length) { alert('Add at least one valid homework problem for this grade, or turn off homework only.'); return null; }
   const settings = { name, grade, moduleIds, perDoor: Number($('perDoor').value), roomSize: $('roomSize').value, avatar: { ...avatar }, music: Number($('music').value), homework: $('homework').value, homeworkOnly: $('hwOnly').checked };
   store.set(profileKey(name), settings);
   const names = store.get('mathcastle.profiles', []);
   if (!names.some((n) => n.toLowerCase() === name.toLowerCase())) store.set('mathcastle.profiles', [...names, name]);
   store.set('mathcastle.last', name);
-  const hw = parseHomework(settings.homework, grade).problems;
   return { ...settings, homework: hw };
 }
 function start(vr) {
   const opts = collect();
   if (!opts) return;
   $('setup').style.display = 'none';
+  preview.dispose();
   const game = window.__castle = new Game(opts);
   game.onPlayAgain = () => { sessionStorage.setItem('mathcastle.autostart', vr ? 'vr' : 'desk'); location.reload(); };
   game.onExitVR = () => { $('hud').style.display = 'block'; $('deskHelp').style.display = 'block'; $('crosshair').style.display = 'block'; };
-  if (vr) game.enterVR().catch((e) => { alert(`Could not start VR: ${e.message}`); game.startDesktop(); game.onExitVR(); });
+  const returnToSetup = (message) => { sessionStorage.setItem('mathcastle.notice', message); location.reload(); };
+  game.onResetVR = () => returnToSetup('Your tracking space changed. Stand in the middle of your clear space, face forward, and enter VR again.');
+  if (vr) game.enterVR().catch((e) => returnToSetup(`Could not start VR: ${e.message}`));
   else { game.startDesktop(); game.onExitVR(); }
 }
 
@@ -264,6 +270,8 @@ if (navigator.xr) {
 }
 const auto = sessionStorage.getItem('mathcastle.autostart');
 if (auto) { sessionStorage.removeItem('mathcastle.autostart'); if (auto === 'desk') start(false); }
+const notice = sessionStorage.getItem('mathcastle.notice');
+if (notice) { sessionStorage.removeItem('mathcastle.notice'); $('settingsBody').style.display = 'block'; const message = document.createElement('p'); message.className = 'err'; message.textContent = notice; $('settingsBody').prepend(message); }
 </script>
 </body>
 </html>

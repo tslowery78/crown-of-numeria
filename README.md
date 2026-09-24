@@ -41,9 +41,11 @@ Run `./serve.sh` on the Mac and open the https://<ip>:8443 address it prints. Yo
 
 1. Clear the space and set a **room-scale** Guardian. A stationary boundary won't work because she needs to walk around.
 2. Measure the clear square inside the Guardian and pick the next size down on the setup screen (2, 2.5, 3, 3.5 or 4 m). You can also add `&room=3` to a player's bookmark link.
-3. She stands in the **middle** of the space and faces the wall that should hold the Magic Lock, then taps Enter. The virtual room is centred on that spot.
+3. For a measured size, she stands in the **middle** of the space, faces the wall that should hold the Magic Lock, and taps Enter. Keep facing forward until the castle appears. The first tracked head pose sets the centre and direction.
 
-"Try automatic Guardian fit" reads the boundary through WebXR's `bounded-floor`. Other developers have reported that Quest 3 returns an empty or undersized boundary this way, so it's experimental. If no boundary comes back, the game falls back to 2.5 m.
+"Try automatic Guardian fit" reads the boundary through WebXR's `bounded-floor` and uses its centre and direction. It is experimental: missing bounds or a fitted room smaller than 1.6 m on either side after margins stop entry and return to settings. Select a measured size instead. The game never enlarges an automatic fit to meet its minimum size.
+
+If tracking is recentered or the reference space resets, VR ends and setup reopens for a fresh alignment. Saved profile settings and completed-castle totals remain; the unfinished climb restarts.
 
 ## Controls
 
@@ -55,7 +57,7 @@ Run `./serve.sh` on the Mac and open the https://<ip>:8443 address it prints. Yo
 | Go up a floor | stand on the glowing square | same | walk onto the square |
 | Grab / throw | pinch near it, let go while moving | grip (or trigger) near it; point + trigger pulls it to your hand | click it, then click again to throw |
 
-There's no thumbstick movement or turning, so the virtual walls always line up with the real room. The ride up takes about 5 seconds and pauses if she steps off the square. The gem and floor counter sits on the left controller.
+There's no thumbstick movement or turning. Check the room alignment against the clear space when entering VR. The ride up takes about 5 seconds and pauses if she steps off the square. The gem and floor counter sits on the left controller.
 
 ## Adding homework
 
@@ -69,7 +71,15 @@ Is 17 even or odd? | odd | even; odd
 3/8 + 4/8 = ? | 7/8
 ```
 
-Answers are checked by value, so `7/8`, `0.875`, `4.5` and `4.50` all match correctly. If an answer is a word, list the choices after a second `|`. Each name's settings and homework are saved on the headset per player. Tick "Only use my homework problems" to skip the generated practice.
+Answers are checked by value: `7/8` matches `0.875`, and `4.5` matches `4.50`. Mixed-number answers such as `1 1/2` are accepted and converted to an improper fraction; enter `3/2` or `1.5` in the game. Both grades' homework keypads include fractions, decimals, and a `±` sign key. Use backspace to correct input. If an answer is a word, list the choices after a second `|`. Each name's settings and homework are saved on the headset per player. Tick "Only use my homework problems" to skip the generated practice. Invalid homework blocks launch; homework-only requires at least one valid problem for the selected grade.
+
+## Verification
+
+`npm test` checks numeric parsing, homework-only behavior, and independently recomputes answers for 15,600 generated questions across 78 generators.
+
+For browser regressions, install dependencies with `npm ci`, start `python3 -m http.server 8765 --bind 127.0.0.1`, then run `npm run test:browser` with Chrome installed. To check the published game, run `npm run test:browser -- https://tslowery78.github.io/crown-of-numeria/`. These tests use isolated browser storage, accelerated gameplay, and stub XR sessions for boundary and coordinate tests.
+
+Desktop and simulated XR tests do not establish Quest frame rate, stereo mirror quality, hand/controller throw feel, or perceived spatial sound. Mirrors add substantial draw calls; reduced mirror resolution only reduces pixel work. The hidden setup preview is stopped and disposed before gameplay.
 
 ## Files
 

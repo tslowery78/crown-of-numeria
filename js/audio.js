@@ -194,10 +194,19 @@ export class AudioEngine {
     const c = this.ctx, s = c.createBufferSource(), f = c.createBiquadFilter(), g = c.createGain(), lfo = c.createOscillator(), lg = c.createGain();
     s.buffer = this.noiseBuf; s.loop = true; f.type = 'bandpass'; f.frequency.value = 500; f.Q.value = 0.7;
     lfo.frequency.value = 0.13; lg.gain.value = 250; lfo.connect(lg); lg.connect(f.frequency);
-    g.gain.value = 0.0; s.connect(f); f.connect(g); g.connect(this.ambBus); s.start(); lfo.start();
+    const panner = c.createPanner(); panner.panningModel = 'HRTF'; panner.rolloffFactor = 0; // level is already controlled by window distance
+    g.gain.value = 0.0; s.connect(f); f.connect(g); g.connect(panner); panner.connect(this.ambBus); s.start(); lfo.start();
     this.windGain = g;
+    this.windPanner = panner;
   }
-  setWind(level) { if (this.windGain) this.windGain.gain.setTargetAtTime(0.02 + level * 0.1, this.now, 0.5); }
+  setWind(level, position) {
+    if (this.windGain) this.windGain.gain.setTargetAtTime(0.02 + level * 0.1, this.now, 0.5);
+    if (this.windPanner && position) {
+      this.windPanner.positionX.setTargetAtTime(position.x, this.now, 0.1);
+      this.windPanner.positionY.setTargetAtTime(position.y, this.now, 0.1);
+      this.windPanner.positionZ.setTargetAtTime(position.z, this.now, 0.1);
+    }
+  }
 
   // ------------------------------------------------------------ generative music
   startMusic(mood = 'castle') {

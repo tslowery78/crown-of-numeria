@@ -238,6 +238,7 @@ export class Props {
   }
   grab(b, holder) {
     if (b.worn) this.unwear(b);
+    if (b.inBasket) this.basketCount = Math.max(0, this.basketCount - 1);
     b.held = holder; b.outside = false; b.inBasket = false;
     holder.updateWorldMatrix(true, false);
     b.rel = holder.worldToLocal(b.mesh.position.clone());
@@ -420,7 +421,7 @@ export class Props {
         if (n === 10) { this.g.floatText('STRIKE! All 10 pins!', pos, '#ffd54a', 3); this.g.audio?.cueStrike(); this.g.burst(pos, 80); }
         else { this.g.floatText(`${n} down! 10 − ${n} = ${10 - n} standing`, pos, '#ffffff', 3.5); this.g.audio?.cueScore(); }
       }
-      if (R.t > 6.5) { for (const p of this.pins) { p.down = false; p.t = 0; p.grp.position.copy(p.home); p.grp.quaternion.identity(); } R.active = false; this.g.burst(this.pins[4].home.clone().add(new THREE.Vector3(0, 0.2, 0)), 30); }
+      if (R.t > 6.5) { for (const p of this.pins) { p.down = false; p.t = 0; p.grp.position.copy(p.home); p.grp.quaternion.identity(); } R.active = false; R.t = 0; R.announced = false; this.g.burst(this.pins[4].home.clone().add(new THREE.Vector3(0, 0.2, 0)), 30); }
     }
   }
   knock(pin, dir) {
@@ -447,7 +448,8 @@ export class Props {
         this.g.audio?.cueScore(); this.g.burst(c.clone().add(new THREE.Vector3(0, 0.25, 0)), 25);
         if (this.basketCount >= this.apples.length) {
           this.g.floatText(`All ${this.apples.length} apples in the basket!`, pos, '#ffd54a', 3);
-          setTimeout(() => { this.basketCount = 0; for (const x of this.apples) this.respawn(x); }, 3500);
+          clearTimeout(this.basketReset);
+          this.basketReset = setTimeout(() => { for (const x of this.apples) if (!x.held) this.respawn(x); this.basketCount = this.apples.filter((x) => x.inBasket).length; }, 3500);
         } else this.g.floatText(`Apples in the basket: ${this.basketCount}`, pos, '#ffffff', 2.2);
       }
     }

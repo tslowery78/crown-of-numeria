@@ -1,0 +1,10 @@
+{
+  "name": "crown-of-numeria",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/problems.test.mjs && node tests/generated-math.mjs",
+    "test:browser": "node tests/browser.cjs"
+  },
+  "devDependencies": { "playwright": "1.62.1" }
+}
