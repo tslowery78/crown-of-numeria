@@ -1,22 +1,25 @@
-// Crown of Numeria: a WebXR math castle for Meta Quest 3 (also playable with mouse +
-// keyboard). Doors and treasure chests are locked by math problems.
+// Crown of Numeria: a room-scale WebXR math tower for Meta Quest 3 (also
+// playable with mouse + keyboard). Each floor of the tower is one room sized
+// to the real play area. Solving a floor's Magic Lock opens the ceiling hatch;
+// standing on the magic square lifts the player up to the next floor.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/BufferGeometryUtils.js';
 import { ProblemSource, isCorrect, speakable } from './problems.js';
 
 // ------------------------------------------------------------ layout
-const W = 8, L = 10, H = 5, WALL_T = 0.4, DOOR_W = 2.2, DOOR_H = 3.2;
-const ROOMS = [
-  { name: 'Entrance Hall', banner: '#2e7d32', floor: 'stone', light: 0xffc27a },
-  { name: 'Great Hall', banner: '#c62828', floor: 'wood', light: 0xffb866 },
-  { name: 'Royal Library', banner: '#1565c0', floor: 'wood', light: 0xffd08a },
-  { name: "Knights' Armory", banner: '#6a1b9a', floor: 'stone', light: 0xffc27a },
-  { name: 'Crystal Tower', banner: '#00838f', floor: 'stone', light: 0xb9a0ff },
-  { name: 'Throne Room', banner: '#f9a825', floor: 'stone', light: 0xffd27a },
+const FH = 3.6, SLAB = 0.4, CEIL = FH - SLAB, WALL_T = 0.3, HATCH = 1.2;
+const FLOORS = [
+  { name: 'Entrance Hall', banner: '#2e7d32', floor: 'stone', light: 0xffc27a, emblem: '♔', windows: 'S' },
+  { name: 'Great Hall', banner: '#c62828', floor: 'wood', light: 0xffb866, emblem: '♕', windows: 'WS' },
+  { name: 'Royal Library', banner: '#1565c0', floor: 'wood', light: 0xffd08a, emblem: '♖', windows: 'S' },
+  { name: "Knights' Armory", banner: '#6a1b9a', floor: 'stone', light: 0xffc27a, emblem: '♘', windows: 'WS' },
+  { name: 'Crystal Chamber', banner: '#00838f', floor: 'stone', light: 0xb9a0ff, emblem: '✦', windows: 'EWS' },
+  { name: 'Tower Top', banner: '#f9a825', floor: 'stone', light: 0xffffff, emblem: '♛', roof: true },
 ];
-const LAST = ROOMS.length - 1;
-const zc = (i) => -i * L;
-const wallZ = (i) => zc(i) - L / 2; // wall between room i and room i+1
+const TOP = FLOORS.length - 1;
+const fy = (i) => i * FH;
+const ROOM_MIN = 1.6, ROOM_MAX = 5, EDGE_MARGIN = 0.15;
+
 const TREASURES = [
   ['Ruby', 0xe0115f], ['Sapphire', 0x2a6cff], ['Emerald', 0x1fc46b], ['Amethyst', 0x9b4dff], ['Golden Star', 0xffc629],
 ];
@@ -49,7 +52,9 @@ class Sfx {
   door() { this.tone(70, 0, 1.4, 'sawtooth', 0.12, 45); this.tone(110, 0.05, 1.1, 'square', 0.04, 60); [784, 988, 1175].forEach((f, i) => this.tone(f, 0.2 + i * 0.1, 0.5, 'sine', 0.12)); }
   chest() { for (let i = 0; i < 10; i++) this.tone(1200 + Math.random() * 1600, i * 0.05, 0.25, 'sine', 0.08); }
   gem() { this.tone(1319, 0, 0.15, 'sine', 0.15); this.tone(1760, 0.08, 0.3, 'sine', 0.15); }
-  teleport() { this.tone(500, 0, 0.18, 'sine', 0.1, 1100); }
+  lift() { this.tone(180, 0, 5, 'sine', 0.08, 360); for (let k = 0; k < 12; k++) this.tone(900 + k * 90, k * 0.4, 0.4, 'sine', 0.05); }
+  arrive() { [659, 784, 988, 1319].forEach((f, i) => this.tone(f, i * 0.1, 0.4, 'triangle', 0.15)); }
+  boom() { this.tone(120, 0, 0.5, 'sawtooth', 0.08, 40); [1400, 1800, 2200].forEach((f, i) => this.tone(f, 0.15 + i * 0.05, 0.3, 'sine', 0.04)); }
   fanfare() { [[392, 0], [523, 0.18], [659, 0.36], [784, 0.54], [659, 0.8], [784, 0.95]].forEach(([f, t]) => { this.tone(f, t, 0.5, 'square', 0.07); this.tone(f / 2, t, 0.5, 'triangle', 0.12); }); }
 }
 
@@ -182,8 +187,9 @@ function makeSign(text, { w = 2.4, h = 0.5, bg = '#3b2412', fg = '#ffe9a8', size
 // ------------------------------------------------------------ puzzle panel
 const PW = 1024, PH = 1280;
 class Panel {
-  constructor(game, { title, count, onSolved, doneText = 'Unlocked!', width = 0.9 }) {
+  constructor(game, { title, count, onSolved, doneText = 'Unlocked!', width = 0.8 }) {
     Object.assign(this, { game, title, count, onSolved, doneText });
+    this.w = width; this.h = width * PH / PW;
     this.solved = 0; this.input = ''; this.wrong = 0; this.msg = ''; this.msgColor = '#fff';
     this.hoverId = null; this.busyUntil = 0; this.after = null; this.state = 'solving';
     this.canvas = document.createElement('canvas'); this.canvas.width = PW; this.canvas.height = PH;
@@ -333,22 +339,88 @@ class Panel {
   }
 }
 
+
+// ------------------------------------------------------------ play-area fitting
+function insidePoly(x, z, pts) {
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const xi = pts[i].x, zi = pts[i].z, xj = pts[j].x, zj = pts[j].z;
+    if ((zi > z) !== (zj > z) && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) inside = !inside;
+  }
+  return inside;
+}
+// Largest axis-aligned rectangle that fits inside the Guardian polygon.
+// Tries a grid of centres; returns { cx, cz, w, d } in metres.
+export function fitRoom(pts) {
+  const xs = pts.map((p) => p.x), zs = pts.map((p) => p.z);
+  const [x0, x1, z0, z1] = [Math.min(...xs), Math.max(...xs), Math.min(...zs), Math.max(...zs)];
+  const fits = (cx, cz, a, b) => {
+    const n = 16;
+    for (let k = 0; k <= n; k++) {
+      const t = -1 + (2 * k) / n;
+      if (!insidePoly(cx + t * a, cz - b, pts) || !insidePoly(cx + t * a, cz + b, pts) || !insidePoly(cx - a, cz + t * b, pts) || !insidePoly(cx + a, cz + t * b, pts)) return false;
+    }
+    return !pts.some((p) => Math.abs(p.x - cx) < a - 1e-6 && Math.abs(p.z - cz) < b - 1e-6);
+  };
+  const centres = [{ x: xs.reduce((s, v) => s + v, 0) / pts.length, z: zs.reduce((s, v) => s + v, 0) / pts.length }];
+  const G = 8;
+  for (let i = 1; i < G; i++) for (let j = 1; j < G; j++) centres.push({ x: x0 + ((x1 - x0) * i) / G, z: z0 + ((z1 - z0) * j) / G });
+  let best = { cx: 0, cz: 0, a: 0, b: 0 };
+  for (const c of centres) {
+    if (!insidePoly(c.x, c.z, pts)) continue;
+    for (let a = 0.3; a <= 4; a += 0.1) {
+      if (!fits(c.x, c.z, a, 0.05)) break;
+      let lo = 0.05, hi = 4;
+      while (hi - lo > 0.02) { const m = (lo + hi) / 2; if (fits(c.x, c.z, a, m)) lo = m; else hi = m; }
+      if (a * lo > best.a * best.b) best = { cx: c.x, cz: c.z, a, b: lo };
+    }
+  }
+  return { cx: best.cx, cz: best.cz, w: 2 * best.a, d: 2 * best.b };
+}
+
 // ------------------------------------------------------------ the game
 export class Game {
   constructor(opts) {
-    this.opts = opts; // { name, grade, moduleIds, perDoor, homework, homeworkOnly, smooth }
-    this.source = new ProblemSource(opts);
-    this.stats = { attempts: 0, correct: 0, firstTry: 0, missed: [], treasures: [] };
+    this.opts = opts; // { name, grade, moduleIds, perDoor, homework, homeworkOnly, roomSize }
     this.sfx = new Sfx();
-    this.reach = 0; // highest room index the player may enter
-    this.panels = []; this.chests = []; this.doors = []; this.anims = []; this.particles = [];
-    this.blockers = []; this.floors = [];
-    this.panelY = 1.2;
     this.clock = new THREE.Clock();
+    this.anims = []; this.particles = [];
     this.initRenderer();
-    this.buildCastle();
     this.initControls();
     this.renderer.setAnimationLoop(() => this.frame());
+  }
+
+  presetSize() {
+    const n = parseFloat(this.opts.roomSize);
+    return Number.isFinite(n) ? n : 2.5;
+  }
+
+  startDesktop() {
+    const s = this.presetSize();
+    this.buildWorld(s, s);
+  }
+
+  async enterVR() {
+    const session = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking'] });
+    let type = 'local-floor', w = this.presetSize(), d = w, cx = 0, cz = 0;
+    if (this.opts.roomSize === 'auto') {
+      try {
+        const space = await session.requestReferenceSpace('bounded-floor');
+        const pts = space.boundsGeometry;
+        if (pts && pts.length >= 3) {
+          const fit = fitRoom([...pts].map((p) => ({ x: p.x, z: p.z })));
+          if (fit.w > 1 && fit.d > 1) { type = 'bounded-floor'; w = fit.w - 2 * EDGE_MARGIN; d = fit.d - 2 * EDGE_MARGIN; cx = fit.cx; cz = fit.cz; }
+        }
+      } catch { /* no Guardian bounds: use the preset size around the start spot */ }
+    }
+    this.fitInfo = { type, w, d };
+    this.renderer.xr.setReferenceSpaceType(type);
+    this.buildWorld(w, d);
+    this.rig.position.set(-cx, 0, -cz);
+    this.camera.position.set(0, 0, 0); this.camera.rotation.set(0, 0, 0);
+    await this.renderer.xr.setSession(session);
+    this.sfx.resume();
+    session.addEventListener('end', () => { this.camera.position.set(0, 1.3, 0); this.rig.position.x = this.rig.position.z = 0; this.onExitVR?.(); });
   }
 
   // ---------------------------------------------------------- setup
@@ -361,246 +433,410 @@ export class Game {
     r.xr.setFoveation(1);
     document.body.appendChild(r.domElement);
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x120c1c);
-    this.scene.fog = new THREE.Fog(0x120c1c, 14, 40);
-    this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 80);
+    this.scene.background = new THREE.Color(0xbfe3ff);
+    this.scene.fog = new THREE.Fog(0xcfe6ff, 160, 700);
+    this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.03, 1000);
     this.camera.rotation.order = 'YXZ';
     this.rig = new THREE.Group();
     this.rig.add(this.camera);
     this.scene.add(this.rig);
-    this.rig.position.set(0, 0, zc(0) + 4.0);
-    this.camera.position.y = 1.3; // desktop eye height; XR overrides with real head pose
+    this.camera.position.y = 1.3; // desktop eye height; XR overrides with the real head pose
     window.addEventListener('resize', () => {
       this.camera.aspect = window.innerWidth / window.innerHeight; this.camera.updateProjectionMatrix();
       r.setSize(window.innerWidth, window.innerHeight);
     });
   }
 
-  buildCastle() {
-    const S = new StaticBatch(), scene = this.scene;
+  buildWorld(W, D) {
+    W = clamp(W, ROOM_MIN, ROOM_MAX); D = clamp(D, ROOM_MIN, ROOM_MAX);
+    this.W = W; this.D = D;
+    if (this.world) { this.scene.remove(this.world); this.world.traverse((o) => { o.geometry?.dispose(); }); }
+    this.world = new THREE.Group(); this.scene.add(this.world);
+    this.source = new ProblemSource(this.opts);
+    this.stats = { attempts: 0, correct: 0, firstTry: 0, missed: [], treasures: [] };
+    this.level = 0; this.lift = { state: 'locked', dwell: 0, t: 0 };
+    this.panels = []; this.chests = []; this.locks = []; this.hatches = []; this.blockers = []; this.floaters = [];
+    this.panelH = 1.0;
+    this.rig.position.set(0, 0, 0);
+
+    const S = new StaticBatch(), world = this.world, hw = W / 2, hd = D / 2;
     const M = (o) => new THREE.MeshLambertMaterial(o);
-    const stone = M({ map: stoneTex() }), stoneDark = M({ map: stoneTex([95, 88, 80]) });
-    const woodFloor = M({ map: woodTex([110, 72, 40]) }), wood = M({ map: woodTex([92, 56, 30]) }), woodDark = M({ map: woodTex([60, 38, 22]) });
-    const iron = M({ color: 0x2c2c33 }), gold = M({ color: 0xd9a627, emissive: 0x2a1c00 }), red = M({ color: 0x9c1b24 });
-    const flame = new THREE.MeshBasicMaterial({ color: 0xffa640 }); flame.userData.noBlock = true;
-    this.flameMat = flame;
-    const glass = new THREE.MeshBasicMaterial({ map: canvasTexture(256, 512, (ctx, w, h) => {
-      const cols = ['#e53935', '#1e88e5', '#fdd835', '#43a047', '#8e24aa', '#fb8c00'];
-      for (let y = 0; y < h; y += 64) for (let x = 0; x < w; x += 64) { ctx.fillStyle = cols[Math.floor(Math.random() * cols.length)]; ctx.fillRect(x, y, 64, 64); }
-      ctx.strokeStyle = '#111'; ctx.lineWidth = 8; for (let x = 0; x <= w; x += 64) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); } for (let y = 0; y <= h; y += 64) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
-      ctx.globalCompositeOperation = 'destination-in'; ctx.beginPath(); ctx.moveTo(0, h); ctx.lineTo(0, w / 2); ctx.arc(w / 2, w / 2, w / 2, Math.PI, 0); ctx.lineTo(w, h); ctx.fill();
-    }), transparent: true });
-    const floorMats = { stone: M({ map: stoneTex([110, 104, 98]) }), wood: woodFloor };
-    const carpet = M({ color: 0x8e1b2b }); carpet.userData.noBlock = true;
-    const plane = (w, h) => tileUV(new THREE.PlaneGeometry(w, h), [w, h], 2);
+    const mats = this.mats = {
+      stone: M({ map: stoneTex() }), stoneDark: M({ map: stoneTex([95, 88, 80]) }),
+      wood: M({ map: woodTex([92, 56, 30]) }), woodDark: M({ map: woodTex([60, 38, 22]) }),
+      iron: M({ color: 0x2c2c33 }), gold: M({ color: 0xd9a627, emissive: 0x2a1c00 }), red: M({ color: 0x9c1b24 }),
+      flame: new THREE.MeshBasicMaterial({ color: 0xffa640 }), M,
+    };
+    mats.flame.userData.noBlock = true;
+    const floorMats = { stone: M({ map: stoneTex([110, 104, 98]) }), wood: M({ map: woodTex([110, 72, 40]) }) };
+    const plane = (w, h) => tileUV(new THREE.PlaneGeometry(w, h), [w, h], 1.5);
+    // four rectangles around a centred square hole
+    const ring = (w, d, h) => [
+      { x: 0, z: -(h / 2 + (d - h) / 4), w, d: (d - h) / 2 }, { x: 0, z: h / 2 + (d - h) / 4, w, d: (d - h) / 2 },
+      { x: -(h / 2 + (w - h) / 4), z: 0, w: (w - h) / 2, d: h }, { x: h / 2 + (w - h) / 4, z: 0, w: (w - h) / 2, d: h },
+    ];
+    // a wall with an optional centred window hole
+    const wall = (y0, h, cx, cz, len, alongX, win) => {
+      const piece = (u, yc, l, ph) => S.box(alongX ? l : WALL_T, ph, alongX ? WALL_T : l, mats.stone, [alongX ? cx + u : cx, y0 + yc, alongX ? cz : cz + u], [0, 0, 0], 1.5);
+      if (!win) return piece(0, h / 2, len, h);
+      const ww = 0.7, sill = 0.95, wh = 1.1, side = (len - ww) / 2;
+      piece(-(ww / 2 + side / 2), h / 2, side, h); piece(ww / 2 + side / 2, h / 2, side, h);
+      piece(0, sill / 2, ww, sill); piece(0, sill + wh + (h - sill - wh) / 2, ww, h - sill - wh);
+      for (const k of [-1, 0, 1]) S.add(new THREE.CylinderGeometry(0.012, 0.012, wh, 6), mats.iron, [alongX ? cx + k * 0.2 : cx, y0 + sill + wh / 2, alongX ? cz : cz + k * 0.2]);
+      S.box(alongX ? ww + 0.12 : WALL_T + 0.04, 0.08, alongX ? WALL_T + 0.04 : ww + 0.12, mats.stoneDark, [cx, y0 + sill - 0.04, cz], [0, 0, 0], 1);
+    };
 
-    this.scene.add(new THREE.HemisphereLight(0xfff2dd, 0x3a2a1a, 1.4));
-    this.roomLights = [];
+    this.buildKingdom(S);
 
-    ROOMS.forEach((room, i) => {
-      const z = zc(i);
-      // floor (kept separate so teleport rays know where the ground is)
-      const floor = new THREE.Mesh(plane(W, L), floorMats[room.floor]);
-      floor.rotation.x = -Math.PI / 2; floor.position.set(0, 0, z);
-      floor.userData.floor = true; scene.add(floor); this.floors.push(floor);
-      S.add(plane(1.8, L - 0.6), carpet, [0, 0.006, z], [-Math.PI / 2, 0, 0]);
-      // ceiling + beams
-      S.add(plane(W, L), woodDark, [0, H, z], [Math.PI / 2, 0, 0]);
-      for (let k = -2; k <= 2; k++) S.box(W, 0.3, 0.3, woodDark, [0, H - 0.15, z + k * 2], [0, 0, 0], 2);
-      // side walls
-      for (const s of [-1, 1]) S.box(WALL_T, H, L + WALL_T, stone, [s * (W / 2 + WALL_T / 2), H / 2, z], [0, 0, 0], 2);
-      // corner pillars
-      for (const sx of [-1, 1]) for (const sz of [-1, 1]) S.add(new THREE.CylinderGeometry(0.28, 0.32, H, 12), stoneDark, [sx * (W / 2 - 0.3), H / 2, z + sz * (L / 2 - 0.3)]);
-      // torches on side walls
-      for (const s of [-1, 1]) for (const dz of [-2.6, 2.6]) {
-        S.box(0.08, 0.5, 0.08, iron, [s * (W / 2 - 0.12), 2.3, z + dz], [0, 0, s * 0.35]);
-        S.add(new THREE.CylinderGeometry(0.1, 0.06, 0.12, 8), iron, [s * (W / 2 - 0.2), 2.55, z + dz]);
-        S.add(new THREE.ConeGeometry(0.08, 0.28, 8), flame, [s * (W / 2 - 0.2), 2.74, z + dz]);
-      }
-      // banners
-      const bannerMat = new THREE.MeshLambertMaterial({ map: canvasTexture(256, 512, (ctx, w, h) => {
-        ctx.fillStyle = room.banner; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(w, 0); ctx.lineTo(w, h); ctx.lineTo(w / 2, h - 80); ctx.lineTo(0, h); ctx.fill();
-        ctx.fillStyle = '#ffd54a'; ctx.fillRect(0, 0, w, 24);
-        ctx.font = 'bold 150px serif'; ctx.textAlign = 'center'; ctx.fillText(['♔', '♕', '♖', '♘', '✦', '♛'][i], w / 2, 250);
-      }), transparent: true, side: THREE.DoubleSide });
-      bannerMat.userData.noBlock = true;
-      for (const s of [-1, 1]) S.add(new THREE.PlaneGeometry(0.9, 1.8), bannerMat, [s * (W / 2 - 0.03), 3.3, z], [0, -s * Math.PI / 2, 0]);
-      // room light
-      const light = new THREE.PointLight(room.light, 18, 13, 1.2);
-      light.position.set(0, 3.9, z); scene.add(light); this.roomLights.push(light);
-
-      // front wall (between room i and i+1) with a doorway, or solid at the end
-      const wz = wallZ(i) - WALL_T / 2;
-      if (i < LAST) {
-        const sw = (W - DOOR_W) / 2;
-        for (const s of [-1, 1]) S.box(sw, H, WALL_T, stone, [s * (DOOR_W / 2 + sw / 2), H / 2, wz], [0, 0, 0], 2);
-        S.box(DOOR_W, H - DOOR_H, WALL_T, stone, [0, DOOR_H + (H - DOOR_H) / 2, wz], [0, 0, 0], 2);
-        for (const s of [-1, 1]) S.box(0.2, DOOR_H + 0.2, WALL_T + 0.1, stoneDark, [s * (DOOR_W / 2 + 0.1), (DOOR_H + 0.2) / 2, wz], [0, 0, 0], 1);
-        S.box(DOOR_W + 0.4, 0.2, WALL_T + 0.1, stoneDark, [0, DOOR_H + 0.1, wz], [0, 0, 0], 1);
+    FLOORS.forEach((fl, i) => {
+      const y0 = fy(i), roof = !!fl.roof, wallH = roof ? 1.0 : FH;
+      if (i === 0) S.add(plane(W, D), floorMats[fl.floor], [0, 0, 0], [-Math.PI / 2, 0, 0]);
+      // walls (outer faces form the tower)
+      const win = (side) => !roof && fl.windows.includes(side);
+      wall(y0, wallH, 0, -hd - WALL_T / 2, W + 2 * WALL_T, true, false);
+      wall(y0, wallH, 0, hd + WALL_T / 2, W + 2 * WALL_T, true, win('S') && W >= 1.4);
+      wall(y0, wallH, hw + WALL_T / 2, 0, D, false, win('E') && D >= 1.4);
+      wall(y0, wallH, -hw - WALL_T / 2, 0, D, false, win('W') && D >= 1.4);
+      if (roof) {
+        // battlements
+        for (const [cx, cz, len, alongX] of [[0, -hd - WALL_T / 2, W + 2 * WALL_T, true], [0, hd + WALL_T / 2, W + 2 * WALL_T, true], [hw + WALL_T / 2, 0, D, false], [-hw - WALL_T / 2, 0, D, false]]) {
+          const n = Math.max(2, Math.floor(len / 0.7));
+          for (let k = 0; k < n; k++) {
+            const u = -len / 2 + (k + 0.5) * (len / n);
+            S.box(alongX ? 0.3 : WALL_T, 0.4, alongX ? WALL_T : 0.3, mats.stone, [alongX ? cx + u : cx, y0 + 1.2, alongX ? cz : cz + u], [0, 0, 0], 1);
+          }
+        }
+        // corner flag poles
+        const flagMat = new THREE.MeshLambertMaterial({ color: 0xff4f9a, side: THREE.DoubleSide }); flagMat.userData.noBlock = true;
+        for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+          const x = sx * (hw + WALL_T / 2), z = sz * (hd + WALL_T / 2);
+          S.add(new THREE.CylinderGeometry(0.03, 0.03, 2.6, 8), mats.iron, [x, y0 + 1.0 + 1.3, z]);
+          S.add(new THREE.PlaneGeometry(0.7, 0.45), flagMat, [x + 0.36, y0 + 3.05, z]);
+        }
       } else {
-        S.box(W, H, WALL_T, stone, [0, H / 2, wz], [0, 0, 0], 2);
+        // slab between this floor and the next, with a hatch hole in the middle
+        const nextFloor = floorMats[FLOORS[i + 1].floor];
+        for (const r of ring(W, D, HATCH)) {
+          S.box(r.w, SLAB, r.d, nextFloor, [r.x, y0 + CEIL + SLAB / 2, r.z], [0, 0, 0], 1.5);
+          S.add(plane(r.w, r.d), mats.woodDark, [r.x, y0 + CEIL - 0.004, r.z], [Math.PI / 2, 0, 0]);
+        }
+        for (const s of [-1, 1]) S.box(0.1, 0.1, HATCH + 0.2, mats.gold, [s * (HATCH / 2 + 0.05), y0 + CEIL - 0.05, 0]), S.box(HATCH + 0.2, 0.1, 0.1, mats.gold, [0, y0 + CEIL - 0.05, s * (HATCH / 2 + 0.05)]);
+        const hm = nextFloor.clone(); hm.transparent = true;
+        const hatch = new THREE.Mesh(tileUV(new THREE.BoxGeometry(HATCH, SLAB, HATCH), [HATCH, SLAB, HATCH], 1.5), hm);
+        hatch.position.set(0, y0 + CEIL + SLAB / 2, 0);
+        world.add(hatch); this.hatches.push(hatch); this.blockers.push(hatch);
+        // torches near the north corners of the side walls
+        for (const s of [-1, 1]) {
+          const x = s * (hw - 0.1), z = -hd + 0.45;
+          S.box(0.06, 0.4, 0.06, mats.iron, [x, y0 + 1.95, z], [0, 0, s * 0.35]);
+          S.add(new THREE.CylinderGeometry(0.08, 0.05, 0.1, 8), mats.iron, [x - s * 0.07, y0 + 2.15, z]);
+          S.add(new THREE.ConeGeometry(0.06, 0.22, 8), mats.flame, [x - s * 0.07, y0 + 2.3, z]);
+        }
+        // banners on the south wall
+        const bx = Math.min(hw - 0.3, 0.95);
+        if (bx >= 0.65) {
+          const bm = this.bannerMat(fl);
+          for (const s of [-1, 1]) S.add(new THREE.PlaneGeometry(0.5, 1.0), bm, [s * bx, y0 + 2.45, hd - 0.02], [0, Math.PI, 0]);
+        }
+        // floor name above the lock
+        const sign = makeSign(`Floor ${i + 1}: ${fl.name}`, { w: Math.min(1.8, W - 0.2), h: 0.32, size: 80 });
+        sign.position.set(0, y0 + 2.3, -hd + 0.02); world.add(sign);
       }
-      if (i === 0) S.box(W, H, WALL_T, stone, [0, H / 2, zc(0) + L / 2 + WALL_T / 2], [0, 0, 0], 2);
-      // stained-glass windows on rooms without shelves on that wall
-      if (i !== 2) for (const s of [-1, 1]) for (const dz of [-3.8, 3.8]) if (!(i === 3 && s === -1)) S.add(new THREE.PlaneGeometry(0.9, 1.8), glass, [s * (W / 2 - 0.02), 2.9, z + dz], [0, -s * Math.PI / 2, 0]);
+      this.decorate(S, i, W, D);
     });
-    glass.userData.noBlock = true;
+    S.build(world, this.blockers);
 
-    this.decorate(S, { stone, stoneDark, wood, woodDark, iron, gold, red, flame, M });
-    S.build(scene, this.blockers);
+    // interior lights follow the player's current floor
+    this.lights = [0, 1].map(() => { const l = new THREE.PointLight(0xffc27a, 6, 9, 1.3); world.add(l); return l; });
+    this.placeLights();
 
-    for (let i = 0; i < LAST; i++) this.makeDoor(i, { wood, iron, gold });
-    for (let i = 0; i < LAST; i++) this.makeChest(i);
-    this.makeFinale(gold, red);
+    for (let i = 0; i < TOP; i++) this.makeLock(i);
+    for (let i = 0; i < TOP; i++) this.makeChest(i);
+    this.makeFinale();
+    this.makeLift();
     this.makeWelcome();
-
-    // teleport marker + pointer dot
-    this.marker = new THREE.Mesh(new THREE.RingGeometry(0.22, 0.3, 32).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x66e0ff, transparent: true, opacity: 0.85 }));
-    this.marker.visible = false; scene.add(this.marker);
+    this.updateHud();
   }
 
-  decorate(S, m) {
-    const { stoneDark, wood, woodDark, iron, gold, red, flame, M } = m;
-    // Room 0 - Entrance: bluebonnet planters + knight statues
-    const z0 = zc(0);
-    const leaf = M({ color: 0x2f7d32 }), blue = M({ color: 0x2a5bd7 }), white = M({ color: 0xf2f2f2 });
-    for (const [x, zz] of [[-3.2, 3.5], [3.2, 3.5], [-3.2, -3.4], [3.2, -3.4]]) {
-      S.box(1.0, 0.5, 0.6, stoneDark, [x, 0.25, z0 + zz], [0, 0, 0], 1);
-      for (let k = 0; k < 9; k++) {
-        const px = x - 0.38 + (k % 3) * 0.38, pz = z0 + zz - 0.18 + Math.floor(k / 3) * 0.18, hgt = 0.3 + Math.random() * 0.2;
-        S.add(new THREE.CylinderGeometry(0.012, 0.012, hgt, 5), leaf, [px, 0.5 + hgt / 2, pz]);
-        S.add(new THREE.ConeGeometry(0.06, 0.22, 7), blue, [px, 0.5 + hgt + 0.08, pz]);
-        S.add(new THREE.SphereGeometry(0.025, 6, 4), white, [px, 0.5 + hgt + 0.2, pz]);
-      }
+  bannerMat(fl) {
+    const m = new THREE.MeshLambertMaterial({ map: canvasTexture(256, 512, (ctx, w, h) => {
+      ctx.fillStyle = fl.banner; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(w, 0); ctx.lineTo(w, h); ctx.lineTo(w / 2, h - 80); ctx.lineTo(0, h); ctx.fill();
+      ctx.fillStyle = '#ffd54a'; ctx.fillRect(0, 0, w, 24);
+      ctx.font = 'bold 150px serif'; ctx.textAlign = 'center'; ctx.fillText(fl.emblem, w / 2, 250);
+    }), transparent: true, side: THREE.DoubleSide });
+    m.userData.noBlock = true;
+    return m;
+  }
+
+  // The kingdom seen through the windows and from the tower top.
+  buildKingdom(S) {
+    const M = (o) => { const m = this.mats.M(o); m.userData.noBlock = true; return m; };
+    const sky = new THREE.SphereGeometry(600, 32, 16), col = [], top = new THREE.Color(0x3d7fd9), hor = new THREE.Color(0xcfe9ff);
+    const pos = sky.attributes.position;
+    for (let k = 0; k < pos.count; k++) { const t = clamp(pos.getY(k) / 600, 0, 1) ** 0.6; const c = hor.clone().lerp(top, t); col.push(c.r, c.g, c.b); }
+    sky.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    const skyMesh = new THREE.Mesh(sky, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false }));
+    skyMesh.renderOrder = -1; this.world.add(skyMesh);
+    const sun = new THREE.Mesh(new THREE.CircleGeometry(25, 32), new THREE.MeshBasicMaterial({ color: 0xfff4c2, fog: false }));
+    sun.position.set(-250, 330, -380); sun.lookAt(0, 0, 0); this.world.add(sun);
+    this.world.add(new THREE.HemisphereLight(0xdfefff, 0x6b8a4a, 1.3));
+    const dl = new THREE.DirectionalLight(0xfff1dc, 1.6); dl.position.set(-40, 80, -60); this.world.add(dl);
+
+    const grassTex = canvasTexture(256, 256, (ctx, w, h) => { ctx.fillStyle = '#5f9e3f'; ctx.fillRect(0, 0, w, h); noise(ctx, w, h, 2500, 0.15); }, true);
+    const grass = M({ map: grassTex }); grass.userData.noBlock = true;
+    S.add(tileUV(new THREE.PlaneGeometry(1400, 1400), [1400, 1400], 12), grass, [0, -0.03, 0], [-Math.PI / 2, 0, 0]);
+    const paving = M({ map: stoneTex([150, 140, 125]) }); paving.userData.noBlock = true;
+    S.add(tileUV(new THREE.CircleGeometry(15, 48), [30, 30], 2), paving, [0, -0.02, 0], [-Math.PI / 2, 0, 0]);
+    const water = M({ color: 0x3f8fd0, emissive: 0x0a2a44 }); water.userData.noBlock = true;
+    S.add(new THREE.RingGeometry(18, 21.5, 64), water, [0, -0.015, 0], [-Math.PI / 2, 0, 0]);
+    // curtain wall with round towers and colourful roofs
+    const wallStone = M({ map: stoneTex([160, 150, 135]) });
+    const R = 16.5, segs = 36;
+    for (let k = 0; k < segs; k++) {
+      const a = (k / segs) * Math.PI * 2, len = (2 * Math.PI * R) / segs + 0.1;
+      S.box(len, 5, 1.2, wallStone, [Math.cos(a) * R, 2.5, Math.sin(a) * R], [0, -a + Math.PI / 2, 0], 2);
+      S.box(0.8, 0.8, 1.2, wallStone, [Math.cos(a) * R, 5.4, Math.sin(a) * R], [0, -a + Math.PI / 2, 0], 1);
     }
-    const statue = M({ color: 0x9a9aa8 });
-    for (const s of [-1, 1]) {
-      const x = s * 1.7, zz = z0 - 4.2;
-      S.box(0.7, 0.4, 0.7, stoneDark, [x, 0.2, zz], [0, 0, 0], 1);
-      S.add(new THREE.CylinderGeometry(0.22, 0.28, 1.0, 10), statue, [x, 0.9, zz]);
-      S.add(new THREE.SphereGeometry(0.17, 12, 8), statue, [x, 1.55, zz]);
-      S.box(0.06, 1.6, 0.06, iron, [x + s * 0.35, 1.2, zz]);
-      S.add(new THREE.ConeGeometry(0.09, 0.3, 4), iron, [x + s * 0.35, 2.1, zz]);
+    const roofCols = [0xff6fae, 0x7f6bff, 0x4fc3ff, 0xffb347, 0x9b5cff, 0x3fd28a];
+    for (let k = 0; k < 6; k++) {
+      const a = (k / 6) * Math.PI * 2 + 0.3, x = Math.cos(a) * R, z = Math.sin(a) * R;
+      S.add(new THREE.CylinderGeometry(2, 2.1, 10, 20), wallStone, [x, 5, z]);
+      S.add(new THREE.ConeGeometry(2.5, 4.5, 20), M({ color: roofCols[k] }), [x, 12.25, z]);
     }
-    // Room 1 - Great Hall: feast table, benches, goblets, chandelier
-    const z1 = zc(1);
-    S.box(1.1, 0.08, 5.5, wood, [-2.5, 0.76, z1], [0, 0, 0], 1);
-    for (const dz of [-2.4, 2.4]) for (const dx of [-0.4, 0.4]) S.box(0.1, 0.72, 0.1, woodDark, [-2.5 + dx, 0.36, z1 + dz]);
-    for (const dx of [-0.85, 0.85]) { S.box(0.35, 0.06, 5.2, wood, [-2.5 + dx, 0.45, z1], [0, 0, 0], 1); for (const dz of [-2.3, 2.3]) S.box(0.08, 0.42, 0.25, woodDark, [-2.5 + dx, 0.21, z1 + dz]); }
-    for (let k = 0; k < 8; k++) {
-      const zz = z1 - 2.4 + k * 0.68, x = -2.5 + (k % 2 ? 0.3 : -0.3);
-      S.add(new THREE.CylinderGeometry(0.05, 0.03, 0.14, 8), gold, [x, 0.87, zz]);
-      S.add(new THREE.CylinderGeometry(0.1, 0.1, 0.03, 12), M({ color: 0xdddddd }), [x * 0 - 2.5, 0.815, zz]);
+    // village, trees, mountains, clouds
+    const houseWall = M({ color: 0xf1e2c4 }), houseRoof = M({ color: 0xb8443a }), trunk = M({ color: 0x6b4a2b }), leaves = M({ color: 0x3f8a3a }), leaves2 = M({ color: 0x2f7a4a });
+    for (let k = 0; k < 18; k++) {
+      const a = Math.random() * Math.PI * 2, r = 30 + Math.random() * 30, x = Math.cos(a) * r, z = Math.sin(a) * r, rot = Math.random() * 3;
+      S.box(3, 2.4, 3.6, houseWall, [x, 1.2, z], [0, rot, 0]);
+      S.add(new THREE.ConeGeometry(2.8, 2, 4), houseRoof, [x, 3.4, z], [0, rot + Math.PI / 4, 0]);
     }
-    S.add(new THREE.SphereGeometry(0.12, 10, 8), red, [-2.5, 0.9, z1 - 0.4]); S.add(new THREE.SphereGeometry(0.1, 10, 8), M({ color: 0x5fbf3f }), [-2.4, 0.88, z1 + 0.3]);
-    S.add(new THREE.TorusGeometry(1.0, 0.05, 8, 32), gold, [0, 3.6, z1], [Math.PI / 2, 0, 0]);
-    for (let k = 0; k < 8; k++) { const a = k / 8 * Math.PI * 2; S.add(new THREE.CylinderGeometry(0.04, 0.04, 0.2, 6), white, [Math.cos(a), 3.72, z1 + Math.sin(a)]); S.add(new THREE.ConeGeometry(0.035, 0.1, 6), flame, [Math.cos(a), 3.87, z1 + Math.sin(a)]); }
-    S.add(new THREE.CylinderGeometry(0.02, 0.02, 1.3, 4), iron, [0, 4.3, z1]);
-    // Room 2 - Library: bookshelves, globe
-    const z2 = zc(2), bookMats = [0x8e2430, 0x1f4e8c, 0x2e7d32, 0x6a3d9a, 0xb8860b].map((c) => M({ color: c }));
-    const shelf = (x, zz, len, face) => {
-      S.box(0.45, 3.2, len, woodDark, [x, 1.6, zz], [0, 0, 0], 1);
-      for (let r = 0; r < 5; r++) {
-        const y = 0.2 + r * 0.62;
-        S.box(0.5, 0.05, len, wood, [x - face * 0.02, y, zz], [0, 0, 0], 1);
-        let p = zz - len / 2 + 0.06;
-        while (p < zz + len / 2 - 0.1) {
-          const bw = 0.05 + Math.random() * 0.05, bh = 0.34 + Math.random() * 0.18;
-          S.box(0.3, bh, bw, bookMats[Math.floor(Math.random() * bookMats.length)], [x - face * 0.08, y + bh / 2 + 0.025, p + bw / 2]);
-          p += bw + 0.008;
+    for (let k = 0; k < 160; k++) {
+      const a = Math.random() * Math.PI * 2, r = 26 + Math.random() * 140, x = Math.cos(a) * r, z = Math.sin(a) * r, s = 0.8 + Math.random() * 0.9;
+      S.add(new THREE.CylinderGeometry(0.25 * s, 0.35 * s, 2 * s, 6), trunk, [x, s, z]);
+      S.add(new THREE.ConeGeometry(1.6 * s, 3.5 * s, 7), k % 2 ? leaves : leaves2, [x, 3.5 * s, z]);
+    }
+    const rock = M({ color: 0x7d8aa6 }), snow = M({ color: 0xffffff });
+    for (let k = 0; k < 16; k++) {
+      const a = (k / 16) * Math.PI * 2 + Math.random() * 0.2, r = 330 + Math.random() * 60, h = 70 + Math.random() * 80, rad = 60 + Math.random() * 40;
+      S.add(new THREE.ConeGeometry(rad, h, 9), rock, [Math.cos(a) * r, h / 2 - 2, Math.sin(a) * r]);
+      S.add(new THREE.ConeGeometry(rad * 0.3, h * 0.3, 9), snow, [Math.cos(a) * r, h * 0.85 - 2, Math.sin(a) * r]);
+    }
+    const cloud = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false }); cloud.userData.noBlock = true;
+    for (let k = 0; k < 14; k++) {
+      const a = Math.random() * Math.PI * 2, r = 120 + Math.random() * 200, x = Math.cos(a) * r, z = Math.sin(a) * r, y = 70 + Math.random() * 50;
+      for (let j = 0; j < 4; j++) S.add(new THREE.SphereGeometry(10 + Math.random() * 8, 10, 6), cloud, [x + j * 12 - 18, y + Math.random() * 4, z + Math.random() * 8], [0, 0, 0], [1, 0.45, 1]);
+    }
+  }
+
+  decorate(S, i, W, D) {
+    const { stoneDark, wood, woodDark, iron, gold, red, flame, M } = this.mats, y0 = fy(i), hw = W / 2, hd = D / 2;
+    if (i === 0) {
+      const leaf = M({ color: 0x2f7d32 }), blue = M({ color: 0x2a5bd7 }), white = M({ color: 0xf2f2f2 });
+      for (const sx of [-1, 1]) {
+        const x = sx * (hw - 0.3), z = -hd + 0.25;
+        S.box(0.45, 0.4, 0.35, stoneDark, [x, 0.2, z], [0, 0, 0], 1);
+        for (let k = 0; k < 6; k++) {
+          const px = x - 0.14 + (k % 3) * 0.14, pz = z - 0.07 + Math.floor(k / 3) * 0.14, h = 0.25 + Math.random() * 0.15;
+          S.add(new THREE.CylinderGeometry(0.01, 0.01, h, 5), leaf, [px, 0.4 + h / 2, pz]);
+          S.add(new THREE.ConeGeometry(0.05, 0.18, 7), blue, [px, 0.4 + h + 0.07, pz]);
+          S.add(new THREE.SphereGeometry(0.02, 6, 4), white, [px, 0.4 + h + 0.17, pz]);
         }
       }
-    };
-    shelf(W / 2 - 0.25, z2 - 2, 4.5, 1); shelf(W / 2 - 0.25, z2 + 3, 2.6, 1);
-    shelf(-W / 2 + 0.25, z2 - 3.1, 2.4, -1); shelf(-W / 2 + 0.25, z2 + 3.2, 2.2, -1);
-    S.add(new THREE.CylinderGeometry(0.05, 0.25, 0.9, 10), woodDark, [2.4, 0.45, z2 + 0.8]);
-    S.add(new THREE.SphereGeometry(0.35, 20, 14), M({ color: 0x3f7fbf }), [2.4, 1.2, z2 + 0.8]);
-    S.add(new THREE.TorusGeometry(0.4, 0.02, 6, 32), gold, [2.4, 1.2, z2 + 0.8], [0, Math.PI / 2, 0.4]);
-    // Room 3 - Armory: suits of armor, shields, weapon rack
-    const z3 = zc(3), steel = M({ color: 0x7f8799, emissive: 0x0a0a10 });
-    for (const dz of [-3, 0, 3]) {
-      const x = -3.2, zz = z3 + dz;
-      S.box(0.6, 0.15, 0.6, stoneDark, [x, 0.075, zz], [0, 0, 0], 1);
-      for (const ly of [-0.1, 0.1]) S.add(new THREE.CylinderGeometry(0.07, 0.08, 0.8, 8), steel, [x, 0.55, zz + ly]);
-      S.add(new THREE.CylinderGeometry(0.2, 0.16, 0.7, 10), steel, [x, 1.3, zz]);
-      for (const ly of [-0.27, 0.27]) S.add(new THREE.CylinderGeometry(0.055, 0.055, 0.65, 8), steel, [x, 1.3, zz + ly]);
-      S.add(new THREE.SphereGeometry(0.15, 12, 10), steel, [x, 1.82, zz]);
-      S.box(0.02, 0.03, 0.2, iron, [x + 0.15, 1.83, zz]);
-      S.add(new THREE.ConeGeometry(0.05, 0.25, 6), red, [x, 2.05, zz]);
     }
-    const shieldCols = [0xc62828, 0x1565c0, 0xf9a825];
-    [-3.2, 0, 3.2].forEach((dz, k) => {
-      S.add(new THREE.CircleGeometry(0.4, 24), M({ color: shieldCols[k] }), [W / 2 - 0.05, 2.6, z3 + dz], [0, -Math.PI / 2, 0]);
-      S.add(new THREE.RingGeometry(0.34, 0.4, 24), gold, [W / 2 - 0.06, 2.6, z3 + dz], [0, -Math.PI / 2, 0]);
-      for (const s of [-1, 1]) S.box(0.03, 1.3, 0.06, steel, [W / 2 - 0.08, 2.6, z3 + dz], [s * 0.7, 0, 0]);
-    });
-    // Room 4 - Crystal Tower: glowing crystal clusters (animated ones are added separately)
-    const z4 = zc(4), cryA = new THREE.MeshLambertMaterial({ color: 0x8fdcff, emissive: 0x2a6f99 }), cryB = new THREE.MeshLambertMaterial({ color: 0xd49bff, emissive: 0x5c2a8c });
-    for (const [x, zz] of [[-3, -3.8], [3, -3.8], [3, 3.6], [-3, 3.6], [3.2, 0]]) {
-      for (let k = 0; k < 6; k++) {
-        const h = 0.4 + Math.random() * 1.1, ox = (Math.random() - 0.5) * 0.7, oz = (Math.random() - 0.5) * 0.7;
-        S.add(new THREE.ConeGeometry(0.12 + Math.random() * 0.08, h, 6), k % 2 ? cryA : cryB, [x + ox, h / 2, z4 + zz + oz], [(Math.random() - 0.5) * 0.5, 0, (Math.random() - 0.5) * 0.5]);
+    if (i === 1) { // feast table on the east wall
+      const len = clamp(D - 1.4, 0.6, 2), x = hw - 0.3, z = -0.35;
+      S.box(0.5, 0.06, len, wood, [x, y0 + 0.74, z], [0, 0, 0], 1);
+      for (const dz of [-1, 1]) S.box(0.08, 0.72, 0.08, woodDark, [x, y0 + 0.36, z + dz * (len / 2 - 0.08)]);
+      for (let k = 0; k < Math.floor(len / 0.35); k++) {
+        const zz = z - len / 2 + 0.2 + k * 0.35;
+        S.add(new THREE.CylinderGeometry(0.035, 0.022, 0.12, 8), gold, [x - 0.1, y0 + 0.83, zz]);
+        S.add(new THREE.CylinderGeometry(0.08, 0.08, 0.02, 12), M({ color: 0xdddddd }), [x + 0.08, y0 + 0.78, zz]);
+        if (k % 2) S.add(new THREE.SphereGeometry(0.05, 8, 6), k % 4 === 1 ? red : M({ color: 0x5fbf3f }), [x + 0.08, y0 + 0.83, zz]);
+      }
+      for (const dz of [-0.3, 0.3]) { S.add(new THREE.CylinderGeometry(0.02, 0.02, 0.18, 6), M({ color: 0xf5f0e0 }), [x, y0 + 0.86, z + dz]); S.add(new THREE.ConeGeometry(0.02, 0.06, 6), flame, [x, y0 + 0.98, z + dz]); }
+    }
+    if (i === 2) { // bookshelves on the east and west walls
+      const bookMats = [0x8e2430, 0x1f4e8c, 0x2e7d32, 0x6a3d9a, 0xb8860b].map((c) => M({ color: c }));
+      const len = clamp(D - 1.2, 0.6, 2.6), z0 = -0.3;
+      for (const s of [-1, 1]) {
+        const x = s * (hw - 0.15);
+        S.box(0.3, 2.4, len, woodDark, [x, y0 + 1.2, z0], [0, 0, 0], 1);
+        for (let r = 0; r < 4; r++) {
+          const y = y0 + 0.15 + r * 0.58;
+          S.box(0.32, 0.04, len, wood, [x - s * 0.01, y, z0], [0, 0, 0], 1);
+          let p = z0 - len / 2 + 0.05;
+          while (p < z0 + len / 2 - 0.08) {
+            const bw = 0.04 + Math.random() * 0.04, bh = 0.3 + Math.random() * 0.15;
+            S.box(0.22, bh, bw, bookMats[Math.floor(Math.random() * bookMats.length)], [x - s * 0.05, y + bh / 2 + 0.02, p + bw / 2]);
+            p += bw + 0.006;
+          }
+        }
       }
     }
-    this.floaters = [];
-    for (let k = 0; k < 7; k++) {
-      const orb = new THREE.Mesh(new THREE.OctahedronGeometry(0.12), k % 2 ? cryA : cryB);
-      orb.position.set((Math.random() - 0.5) * 5, 2.2 + Math.random() * 1.8, z4 + (Math.random() - 0.5) * 7);
-      orb.userData.base = orb.position.y; orb.userData.phase = Math.random() * 6;
-      this.scene.add(orb); this.floaters.push(orb);
+    if (i === 3) { // suits of armor in the north corners, shields on the east wall
+      const steel = M({ color: 0x7f8799, emissive: 0x0a0a10 });
+      for (const sx of [-1, 1]) {
+        const x = sx * (hw - 0.3), z = -hd + 0.3;
+        S.box(0.45, 0.1, 0.45, stoneDark, [x, y0 + 0.05, z], [0, 0, 0], 1);
+        for (const d of [-0.08, 0.08]) S.add(new THREE.CylinderGeometry(0.055, 0.065, 0.7, 8), steel, [x + d, y0 + 0.45, z]);
+        S.add(new THREE.CylinderGeometry(0.17, 0.13, 0.6, 10), steel, [x, y0 + 1.1, z]);
+        for (const d of [-0.23, 0.23]) S.add(new THREE.CylinderGeometry(0.045, 0.045, 0.55, 8), steel, [x + d, y0 + 1.1, z]);
+        S.add(new THREE.SphereGeometry(0.13, 12, 10), steel, [x, y0 + 1.55, z]);
+        S.box(0.18, 0.025, 0.02, iron, [x, y0 + 1.56, z + 0.12]);
+        S.add(new THREE.ConeGeometry(0.045, 0.22, 6), red, [x, y0 + 1.75, z]);
+      }
+      [0xc62828, 0x1565c0].forEach((c, k) => {
+        const z = (k ? 0.45 : -0.35);
+        S.add(new THREE.CircleGeometry(0.28, 24), M({ color: c }), [hw - 0.03, y0 + 1.8, z], [0, -Math.PI / 2, 0]);
+        S.add(new THREE.RingGeometry(0.24, 0.28, 24), gold, [hw - 0.035, y0 + 1.8, z], [0, -Math.PI / 2, 0]);
+      });
     }
-    // Room 5 - Throne Room: throne, gold pillars
-    const z5 = zc(5), velvet = M({ color: 0x6a0f2a });
-    S.box(2.6, 0.3, 2.0, stoneDark, [0, 0.15, z5 - 3.8], [0, 0, 0], 1);
-    S.box(1.3, 0.5, 0.9, gold, [0, 0.55, z5 - 3.9]);
-    S.box(1.1, 0.12, 0.8, velvet, [0, 0.86, z5 - 3.85]);
-    S.box(1.3, 2.2, 0.2, gold, [0, 1.4, z5 - 4.4]);
-    S.box(1.0, 1.6, 0.05, velvet, [0, 1.5, z5 - 4.27]);
-    for (const s of [-1, 1]) { S.box(0.15, 0.4, 0.9, gold, [s * 0.6, 1.0, z5 - 3.9]); S.add(new THREE.SphereGeometry(0.12, 12, 8), gold, [s * 0.6, 2.6, z5 - 4.4]); }
-    for (const s of [-1, 1]) for (const zz of [-1.5, 1.5]) S.add(new THREE.CylinderGeometry(0.22, 0.22, H, 16), gold, [s * 2.6, H / 2, z5 + zz]);
+    if (i === 4) { // crystals + floating gems
+      const cryA = new THREE.MeshLambertMaterial({ color: 0x8fdcff, emissive: 0x2a6f99 }), cryB = new THREE.MeshLambertMaterial({ color: 0xd49bff, emissive: 0x5c2a8c });
+      for (const [x, z] of [[-hw + 0.3, -hd + 0.3], [hw - 0.3, -hd + 0.3], [-hw + 0.3, hd - 0.3]]) {
+        for (let k = 0; k < 5; k++) {
+          const h = 0.3 + Math.random() * 0.8;
+          S.add(new THREE.ConeGeometry(0.08 + Math.random() * 0.05, h, 6), k % 2 ? cryA : cryB, [x + (Math.random() - 0.5) * 0.3, y0 + h / 2, z + (Math.random() - 0.5) * 0.3], [(Math.random() - 0.5) * 0.4, 0, (Math.random() - 0.5) * 0.4]);
+        }
+      }
+      for (let k = 0; k < 6; k++) {
+        const orb = new THREE.Mesh(new THREE.OctahedronGeometry(0.08), k % 2 ? cryA : cryB), a = (k / 6) * Math.PI * 2;
+        orb.position.set(Math.cos(a) * (hw - 0.35), y0 + 2.3 + Math.random() * 0.5, Math.sin(a) * (hd - 0.35));
+        orb.userData.base = orb.position.y; orb.userData.phase = Math.random() * 6;
+        this.world.add(orb); this.floaters.push(orb);
+      }
+    }
+    if (i === TOP) { // lectern for the final lock
+      S.box(0.12, 0.9, 0.12, gold, [0, y0 + 0.45, -hd + 0.12]);
+    }
   }
 
-  makeDoor(i, { wood, iron, gold }) {
-    const z = wallZ(i) - WALL_T / 2;
-    const hinge = new THREE.Group(); hinge.position.set(-DOOR_W / 2, 0, z);
-    const leaf = new THREE.Mesh(tileUV(new THREE.BoxGeometry(DOOR_W, DOOR_H, 0.14), [DOOR_W, DOOR_H, 0.14], 1.2), wood);
-    leaf.position.set(DOOR_W / 2, DOOR_H / 2, 0); hinge.add(leaf);
-    for (const y of [0.5, 1.6, 2.7]) { const band = new THREE.Mesh(new THREE.BoxGeometry(DOOR_W - 0.1, 0.12, 0.18), iron); band.position.set(DOOR_W / 2, y, 0); hinge.add(band); }
-    const lock = new THREE.Group(); lock.position.set(DOOR_W - 0.35, 1.25, 0.12);
-    const body = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.26, 0.08), gold); lock.add(body);
-    const shackle = new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.025, 8, 16, Math.PI), gold); shackle.position.y = 0.13; lock.add(shackle);
-    hinge.add(lock);
-    const lights = [];
-    const n = this.opts.perDoor;
+  // ---------------------------------------------------------- locks, chests, lift
+  makeLock(i) {
+    const hd = this.D / 2, y0 = fy(i), n = this.opts.perDoor;
+    const pad = new THREE.Group(); pad.position.set(0, y0 + 2.85, -hd + 0.06);
+    pad.add(new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.22, 0.07), this.mats.gold));
+    const sh = new THREE.Mesh(new THREE.TorusGeometry(0.085, 0.022, 8, 16, Math.PI), this.mats.gold); sh.position.y = 0.11; pad.add(sh);
+    this.world.add(pad);
+    const gems = [];
     for (let k = 0; k < n; k++) {
-      const gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.07), new THREE.MeshLambertMaterial({ color: 0x555566 }));
-      gem.position.set(DOOR_W / 2 + (k - (n - 1) / 2) * 0.22, 2.25, 0.12); hinge.add(gem); lights.push(gem);
+      const g = new THREE.Mesh(new THREE.OctahedronGeometry(0.05), new THREE.MeshLambertMaterial({ color: 0x555566 }));
+      g.position.set((k - (n - 1) / 2) * 0.16, y0 + 2.6, -hd + 0.06); this.world.add(g); gems.push(g);
     }
-    this.scene.add(hinge);
-    this.blockers.push(leaf);
-    const sign = makeSign(`To the ${ROOMS[i + 1].name}`, { w: 2.6, h: 0.5 });
-    sign.position.set(0, DOOR_H + 0.55, wallZ(i) + 0.02); this.scene.add(sign);
-
-    const door = { i, hinge, lock, lights, open: false };
-    const panel = new Panel(this, { title: `Magic Lock ${i + 1}`, count: n, doneText: 'Unlocked!', onSolved: () => this.openDoor(door) });
-    panel.mesh.position.set(0, this.panelY, wallZ(i) + 1.5);
-    panel.fixedHeight = true;
-    const origUpdate = panel.update.bind(panel);
-    panel.update = () => { origUpdate(); lights.forEach((g, k) => { const on = k < panel.solved; g.material.color.setHex(on ? 0x4dff9a : 0x555566); g.material.emissive?.setHex(on ? 0x1f8a4a : 0); }); };
-    this.scene.add(panel.mesh); this.panels.push(panel);
-    door.panel = panel;
-    this.doors.push(door);
+    const lock = { i, pad, gems, open: false };
+    const panel = new Panel(this, { title: `Magic Lock ${i + 1}`, count: n, doneText: 'Unlocked!', onSolved: () => this.unlock(lock) });
+    panel.mesh.position.set(0, y0 + this.panelH, -hd + 0.03);
+    panel.floor = i; panel.wallMounted = true;
+    const orig = panel.update.bind(panel);
+    panel.update = () => { orig(); gems.forEach((g, k) => { const on = k < panel.solved; g.material.color.setHex(on ? 0x4dff9a : 0x555566); g.material.emissive.setHex(on ? 0x1f8a4a : 0); }); };
+    this.world.add(panel.mesh); this.panels.push(panel);
+    lock.panel = panel; this.locks.push(lock);
   }
 
-  openDoor(door) {
-    door.open = true;
+  unlock(lock) {
+    lock.open = true;
+    const i = lock.i, hatch = this.hatches[i];
     this.sfx.door();
-    this.reach = Math.max(this.reach, door.i + 1);
-    this.updateHud();
-    this.burst(new THREE.Vector3(0, 1.6, wallZ(door.i) + 0.3), 70);
-    this.animate(0.8, (t) => { door.lock.position.y = 1.25 - t * 1.2; door.lock.rotation.z = t * 2; }, () => { door.lock.visible = false; });
-    this.animate(2.0, (t) => { door.hinge.rotation.y = (1 - (1 - t) ** 3) * 1.65; }, null, 0.4);
-    this.retirePanel(door.panel, 1.4);
+    this.animate(0.8, (t) => { lock.pad.position.y = fy(i) + 2.85 - t * 2.4; lock.pad.rotation.z = t * 2; }, () => { lock.pad.visible = false; });
+    this.burst(new THREE.Vector3(0, fy(i) + CEIL - 0.1, 0), 80);
+    this.animate(1.4, (t) => { hatch.material.opacity = 1 - t; hatch.scale.set(1 - t * 0.3, 1, 1 - t * 0.3); }, () => { hatch.visible = false; }, 0.3);
+    this.retirePanel(lock.panel, 1.4);
+    this.lift = { state: 'ready', dwell: 0, t: 0 };
+    this.setGuide('Step onto the glowing square!');
+  }
+
+  makeLift() {
+    const runeTex = canvasTexture(512, 512, (ctx, w, h) => {
+      ctx.fillStyle = '#2b1a4a'; ctx.fillRect(0, 0, w, h);
+      ctx.strokeStyle = '#ffd54a'; ctx.lineWidth = 14; ctx.strokeRect(14, 14, w - 28, h - 28);
+      ctx.lineWidth = 8; ctx.beginPath(); ctx.arc(w / 2, h / 2, 200, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(w / 2, h / 2, 150, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = '#ffd54a'; ctx.font = 'bold 44px serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      const runes = '1234567890+−×÷=★';
+      for (let k = 0; k < 16; k++) { const a = (k / 16) * Math.PI * 2; ctx.save(); ctx.translate(w / 2 + Math.cos(a) * 175, h / 2 + Math.sin(a) * 175); ctx.rotate(a + Math.PI / 2); ctx.fillText(runes[k], 0, 0); ctx.restore(); }
+      ctx.beginPath(); for (let k = 0; k < 5; k++) { const a = -Math.PI / 2 + (k * 4 * Math.PI) / 5; ctx.lineTo(w / 2 + Math.cos(a) * 130, h / 2 + Math.sin(a) * 130); } ctx.closePath(); ctx.stroke();
+    });
+    this.runeMat = new THREE.MeshBasicMaterial({ map: runeTex, color: 0x777777 });
+    const side = new THREE.MeshLambertMaterial({ color: 0xd9a627 });
+    const s = HATCH - 0.02, th = 0.12;
+    const plat = new THREE.Mesh(new THREE.BoxGeometry(s, th, s), [side, side, this.runeMat, side, side, side]);
+    plat.position.set(0, -th / 2 + 0.006, 0);
+    this.platform = plat; this.world.add(plat);
+    // glowing beam that appears when the hatch is open
+    const beam = new THREE.Mesh(new THREE.BoxGeometry(s, CEIL, s).translate(0, CEIL / 2, 0), new THREE.MeshBasicMaterial({ color: 0xffe89a, transparent: true, opacity: 0.12, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+    beam.visible = false; this.beam = beam; this.world.add(beam);
+    // corner crystals that ride along
+    this.liftPosts = [];
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+      const c = new THREE.Mesh(new THREE.OctahedronGeometry(0.05), new THREE.MeshBasicMaterial({ color: 0xffe066 }));
+      c.position.set(sx * (s / 2 - 0.04), 0.9, sz * (s / 2 - 0.04)); plat.add(c); this.liftPosts.push(c);
+    }
+    // floating guide text
+    this.guide = null;
+  }
+
+  setGuide(text) {
+    if (this.guide) { this.world.remove(this.guide); this.guide.material.map.dispose(); this.guide = null; }
+    if (!text) return;
+    this.guide = makeSign(text, { w: 1.2, h: 0.22, size: 70, bg: '#1f2a44', border: '#7fb2ff', fg: '#e8f0ff' });
+    this.world.add(this.guide);
+  }
+
+  onSquare(p) { const m = HATCH / 2 - 0.05; return Math.abs(p.x) < m && Math.abs(p.z) < m; }
+
+  updateLift(dt, head) {
+    const L = this.lift, y0 = fy(this.level), on = this.onSquare(head);
+    const glow = L.state === 'ready' || L.state === 'rising';
+    this.runeMat.color.setScalar(glow ? 0.75 + 0.25 * Math.sin(this.clock.elapsedTime * 4) : 0.45);
+    this.liftPosts.forEach((c) => { c.visible = glow; c.rotation.y += dt * 2; });
+    this.beam.visible = L.state === 'ready';
+    this.beam.position.set(0, y0, 0);
+    if (this.guide) {
+      const dir = new THREE.Vector3(head.x, 0, head.z); const far = dir.length() > 0.2;
+      this.guide.position.set(0, y0 + 2.2, 0);
+      if (far) this.guide.lookAt(head.x, y0 + 2.2, head.z); else this.guide.lookAt(head.x, y0 + 2.2, head.z - 1);
+    }
+    if (L.state === 'ready') {
+      L.dwell = on ? L.dwell + dt : 0;
+      if (L.dwell > 1.5) { L.state = 'rising'; L.t = 0; this.setGuide('Hold on! Going up…'); this.sfx.lift(); }
+    } else if (L.state === 'rising') {
+      if (on) {
+        L.t = Math.min(1, L.t + dt / 5);
+        if (this.guideText !== 'up') { this.guideText = 'up'; this.setGuide('Going up…'); }
+      } else if (this.guideText !== 'back') { this.guideText = 'back'; this.setGuide('Step back on the square!'); }
+      const e = L.t < 0.5 ? 2 * L.t * L.t : 1 - (-2 * L.t + 2) ** 2 / 2;
+      const y = y0 + e * FH;
+      this.platform.position.y = y - 0.06 + 0.006;
+      this.rig.position.y = y;
+      if (L.t >= 1) {
+        this.level++; this.guideText = null;
+        this.lift = { state: this.level >= TOP ? 'done' : 'locked', dwell: 0, t: 0 };
+        this.rig.position.y = fy(this.level);
+        this.setGuide(null); this.placeLights(); this.updateHud();
+        this.sfx.arrive();
+        this.burst(new THREE.Vector3(0, fy(this.level) + 0.3, 0), 50);
+        if (this.level === TOP) this.showBanner('The Tower Top!');
+        else this.showBanner(`Floor ${this.level + 1}: ${FLOORS[this.level].name}`);
+      }
+    }
+  }
+
+  showBanner(text) {
+    const s = makeSign(text, { w: 1.4, h: 0.3, size: 80, bg: '#2b1a4a', fg: '#ffd54a' });
+    const head = this.headPos(), fwd = new THREE.Vector3(); this.camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
+    s.position.copy(head).addScaledVector(fwd, 1.4); s.position.y = head.y + 0.55; s.lookAt(head);
+    this.world.add(s);
+    this.animate(2.4, (t) => { s.material.opacity = t < 0.7 ? 1 : 1 - (t - 0.7) / 0.3; s.position.y += 0.0015; }, () => { this.world.remove(s); s.material.map.dispose(); });
+  }
+
+  placeLights() {
+    const lv = this.level ?? 0;
+    this.lights.forEach((l, k) => {
+      const f = Math.min(lv + k, TOP);
+      l.color.setHex(FLOORS[f].light);
+      l.position.set(this.W * 0.2, fy(f) + CEIL - 0.5, -this.D * 0.2);
+      l.intensity = FLOORS[f].roof ? 0 : 6;
+    });
   }
 
   retirePanel(panel, delay) {
@@ -608,7 +844,6 @@ export class Game {
   }
 
   makeChest(i, big = false) {
-    const s = big ? 1.7 : 1;
     const g = new THREE.Group();
     const woodM = new THREE.MeshLambertMaterial({ color: 0x7a4a22 }), goldM = new THREE.MeshLambertMaterial({ color: 0xe0b23a, emissive: 0x3a2800 });
     const base = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.5, 0.6), woodM); base.position.y = 0.25; g.add(base);
@@ -617,47 +852,49 @@ export class Game {
     const lid = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.9, 16, 1, false, 0, Math.PI).rotateZ(Math.PI / 2), woodM);
     lid.position.set(0, 0, 0.3); lid.scale.set(1, 0.6, 1); lidPivot.add(lid);
     const clasp = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.16, 0.04), goldM); clasp.position.set(0, 0.45, 0.31); g.add(clasp);
+    const s = big ? 1.1 : 0.7;
     g.scale.setScalar(s);
-    const [tName, tColor] = big ? ['Royal Crown', 0xffd700] : TREASURES[i % TREASURES.length];
-    const prize = big ? this.makeCrown() : new THREE.Mesh(new THREE.OctahedronGeometry(0.14), new THREE.MeshStandardMaterial({ color: tColor, emissive: tColor, emissiveIntensity: 0.5, metalness: 0.3, roughness: 0.2 }));
-    prize.visible = false; this.scene.add(prize);
+    const [tName, tColor] = big ? ['Crown of Numeria', 0xffd700] : TREASURES[i % TREASURES.length];
+    const prize = big ? this.makeCrown() : new THREE.Mesh(new THREE.OctahedronGeometry(0.1), new THREE.MeshStandardMaterial({ color: tColor, emissive: tColor, emissiveIntensity: 0.5, metalness: 0.3, roughness: 0.2 }));
+    prize.visible = false; this.world.add(prize);
     const q = makeSign('?', { w: 0.35, h: 0.35, bg: 'rgba(0,0,0,0)', border: 'rgba(0,0,0,0)', fg: '#ffd54a', size: 300, px: 256 });
-    q.position.y = 1.15; g.add(q);
+    q.position.y = 1.3; g.add(q);
     const chest = { i, group: g, lidPivot, prize, tName, q, opened: false, panel: null, big };
-    g.traverse((o) => { if (o.isMesh) o.userData.chest = chest; });
+    g.traverse((o) => { if (o.isMesh && o !== q) o.userData.chest = chest; });
+    const hw = this.W / 2, hd = this.D / 2;
     if (!big) {
-      const x = i % 2 ? 2.8 : -2.8;
-      g.position.set(x, 0, zc(i) + 0.8);
-      g.rotation.y = x > 0 ? -Math.PI / 2 : Math.PI / 2;
+      const x = (i % 2 ? -1 : 1) * (hw - 0.4), z = hd - 0.35;
+      g.position.set(x, fy(i), z);
+      g.rotation.y = Math.atan2(-x, -z);
     }
-    this.scene.add(g);
+    this.world.add(g);
     this.chests.push(chest);
     return chest;
   }
 
   makeCrown() {
     const crown = new THREE.Group(), m = new THREE.MeshStandardMaterial({ color: 0xffd700, emissive: 0x6a4a00, metalness: 0.6, roughness: 0.25 });
-    crown.add(new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.18, 0.14, 24, 1, true), m));
+    crown.add(new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.14, 0.12, 24, 1, true), m));
     for (let k = 0; k < 6; k++) {
-      const a = k / 6 * Math.PI * 2, spike = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.16, 6), m);
-      spike.position.set(Math.cos(a) * 0.19, 0.14, Math.sin(a) * 0.19); crown.add(spike);
-      const jewel = new THREE.Mesh(new THREE.SphereGeometry(0.03, 8, 6), new THREE.MeshBasicMaterial({ color: TREASURES[k % 5][1] }));
-      jewel.position.set(Math.cos(a) * 0.205, 0.0, Math.sin(a) * 0.205); crown.add(jewel);
+      const a = (k / 6) * Math.PI * 2, spike = new THREE.Mesh(new THREE.ConeGeometry(0.04, 0.13, 6), m);
+      spike.position.set(Math.cos(a) * 0.15, 0.12, Math.sin(a) * 0.15); crown.add(spike);
+      const jewel = new THREE.Mesh(new THREE.SphereGeometry(0.025, 8, 6), new THREE.MeshBasicMaterial({ color: TREASURES[k % 5][1] }));
+      jewel.position.set(Math.cos(a) * 0.162, 0, Math.sin(a) * 0.162); crown.add(jewel);
     }
     return crown;
   }
 
   openChestPanel(chest) {
-    if (chest.opened || chest.panel) return;
+    if (chest.opened || chest.panel || chest.i > this.level) return;
     const head = this.headPos(), pos = chest.group.getWorldPosition(new THREE.Vector3());
-    const dir = pos.clone().sub(head).setY(0); const dist = dir.length(); dir.normalize();
-    const p = head.clone().addScaledVector(dir, clamp(dist - 0.9, 0.9, 1.4));
-    const panel = new Panel(this, { title: 'Treasure Chest', count: 1, doneText: `You found a\n${chest.tName}!`, onSolved: () => this.openChest(chest) });
-    panel.mesh.position.set(p.x, this.panelY, p.z);
-    panel.mesh.lookAt(head.x, this.panelY, head.z);
+    const toCenter = new THREE.Vector3(-pos.x, 0, -pos.z).normalize();
+    const p = pos.clone().addScaledVector(toCenter, 0.55);
+    const panel = new Panel(this, { title: 'Treasure Chest', count: 1, width: 0.7, doneText: `You found a\n${chest.tName}!`, onSolved: () => this.openChest(chest) });
+    panel.mesh.position.set(p.x, fy(this.level) + this.panelH + 0.1, p.z);
+    panel.mesh.lookAt(head.x, panel.mesh.position.y, head.z);
     panel.mesh.scale.setScalar(0.01);
     this.animate(0.3, (t) => panel.mesh.scale.setScalar(Math.max(0.01, t)));
-    this.scene.add(panel.mesh); this.panels.push(panel);
+    this.world.add(panel.mesh); this.panels.push(panel);
     chest.panel = panel;
     this.sfx.click();
   }
@@ -667,14 +904,14 @@ export class Game {
     this.sfx.chest();
     const wp = chest.group.getWorldPosition(new THREE.Vector3());
     this.animate(0.8, (t) => { chest.lidPivot.rotation.x = -1.9 * (1 - (1 - t) ** 2); });
-    this.burst(wp.clone().setY(0.8), 60);
+    this.burst(wp.clone().setY(wp.y + 0.5), 60);
     const prize = chest.prize;
-    prize.position.copy(wp).setY(chest.big ? 1.0 : 0.5); prize.visible = true;
+    prize.position.copy(wp).setY(wp.y + 0.4); prize.visible = true;
     this.stats.treasures.push(chest.tName);
     if (chest.big) return this.victory(chest);
-    this.animate(1.4, (t) => { prize.position.y = 0.5 + t * 1.0; prize.rotation.y = t * 8; }, () => {
+    this.animate(1.4, (t) => { prize.position.y = wp.y + 0.4 + t * 0.9; prize.rotation.y = t * 8; }, () => {
       const from = prize.position.clone();
-      this.animate(0.8, (t) => { prize.position.lerpVectors(from, this.headPos().setY(this.headPos().y - 0.3), t * t); prize.scale.setScalar(1 - t * 0.7); }, () => {
+      this.animate(0.8, (t) => { const h = this.headPos(); h.y -= 0.3; prize.position.lerpVectors(from, h, t * t); prize.scale.setScalar(1 - t * 0.7); }, () => {
         prize.visible = false; this.sfx.gem(); this.updateHud();
       });
     }, 0.3);
@@ -682,39 +919,35 @@ export class Game {
   }
 
   makeFinale() {
-    const z = zc(LAST);
-    const chest = this.makeChest(LAST, true);
-    chest.group.position.set(0, 0, z - 1.8);
-    const panel = new Panel(this, { title: 'The Royal Treasure', count: this.opts.perDoor + 1, doneText: 'VICTORY!', onSolved: () => this.openChest(chest) });
-    panel.mesh.position.set(0, this.panelY, z + 0.2);
-    panel.fixedHeight = true;
-    this.scene.add(panel.mesh); this.panels.push(panel);
-    chest.panel = panel; chest.q.visible = false;
+    const y0 = fy(TOP), hd = this.D / 2;
+    const chest = this.makeChest(TOP, true);
+    chest.group.position.set(0, y0, hd - 0.45);
+    chest.group.rotation.y = Math.PI;
+    chest.q.visible = false;
+    const panel = new Panel(this, { title: 'The Crown of Numeria', count: this.opts.perDoor + 1, doneText: 'VICTORY!', onSolved: () => this.openChest(chest) });
+    panel.mesh.position.set(0, y0 + this.panelH, -hd + 0.2);
+    panel.floor = TOP; panel.wallMounted = true;
+    this.world.add(panel.mesh); this.panels.push(panel);
+    chest.panel = panel;
     this.finalChest = chest;
   }
 
   makeWelcome() {
-    const n = this.opts.name || 'Explorer';
-    const text = `Welcome to Numeria, ${n}!\nSolve the magic locks to open each door.\nClick the treasure chests to win gems.\nReach the Throne Room and claim the Crown!`;
-    const sign = makeSign(text, { w: 2.4, h: 1.25, size: 70, px: 1024 });
-    sign.position.set(-2.2, 1.95, zc(0) + 2.3); sign.rotation.y = 0.55;
-    this.scene.add(sign);
-    const help = makeSign('Point + pull trigger (or pinch) to press buttons.\nPoint at the floor + trigger to teleport.\nLeft stick walks, right stick turns.', { w: 2.2, h: 0.8, size: 56, bg: '#1f2a44', border: '#7fb2ff', fg: '#e8f0ff' });
-    help.position.set(2.2, 1.75, zc(0) + 2.3); help.rotation.y = -0.55;
-    this.scene.add(help);
-    const title = makeSign('Crown of Numeria', { w: 3.6, h: 0.6, size: 130, bg: '#2b1a4a', fg: '#ffd54a' });
-    title.position.set(0, 4.45, wallZ(0) + 0.03);
-    this.scene.add(title);
+    const n = this.opts.name || 'Explorer', hw = this.W / 2, len = Math.min(1.7, this.D - 0.5);
+    const welcome = makeSign(`Welcome to Numeria, ${n}!\nSolve each Magic Lock to open the ceiling. Then stand on the glowing square to ride up. Find a treasure chest on every floor!`, { w: len, h: len * 0.55, size: 64 });
+    welcome.position.set(-hw + 0.02, 1.55, 0); welcome.rotation.y = Math.PI / 2; this.world.add(welcome);
+    const help = makeSign('Walk around the room!\nTouch buttons with your finger, or point and pull the trigger.', { w: len, h: len * 0.45, size: 60, bg: '#1f2a44', border: '#7fb2ff', fg: '#e8f0ff' });
+    help.position.set(hw - 0.02, 1.55, 0); help.rotation.y = -Math.PI / 2; this.world.add(help);
   }
 
   victory(chest) {
     this.sfx.fanfare();
-    const z = zc(LAST), crown = chest.prize;
-    this.animate(2.5, (t) => { crown.position.y = 1.0 + t * 1.2; crown.rotation.y = t * 10; });
-    for (let k = 0; k < 6; k++) setTimeout(() => this.burst(new THREE.Vector3((Math.random() - 0.5) * 5, 2.5 + Math.random(), z - Math.random() * 3), 90), k * 350);
-    const s = this.stats, pct = s.attempts ? Math.round(100 * s.correct / s.attempts) : 100;
+    const y0 = fy(TOP), crown = chest.prize, start = crown.position.clone();
+    this.animate(2.5, (t) => { crown.position.set(start.x, start.y + t * 1.1, start.z); crown.rotation.y = t * 10; });
+    for (let k = 0; k < 10; k++) setTimeout(() => { const a = Math.random() * Math.PI * 2, r = 12 + Math.random() * 12; this.burst(new THREE.Vector3(Math.cos(a) * r, y0 + 8 + Math.random() * 8, Math.sin(a) * r), 120, 0.25, 9); this.sfx.boom(); }, 600 + k * 450);
+    const s = this.stats;
     this.saveProgress();
-    const vp = new Panel(this, { title: 'Castle Conquered!', count: 0 });
+    const vp = new Panel(this, { title: 'Tower Conquered!', count: 0 });
     vp.state = 'victory';
     vp.draw = () => {
       const ctx = vp.ctx;
@@ -724,15 +957,14 @@ export class Game {
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillStyle = '#ffd54a'; ctx.font = `bold 84px ${FONT}`; ctx.fillText('You did it,', PW / 2, 140);
       ctx.fillText(`${this.opts.name || 'Explorer'}!`, PW / 2, 240);
-      ctx.fillStyle = '#fff'; ctx.font = `bold 52px ${FONT}`;
+      ctx.fillStyle = '#fff'; ctx.font = `bold 50px ${FONT}`;
       ctx.fillText('The Crown of Numeria is yours!', PW / 2, 360);
       ctx.font = `44px ${FONT}`;
       ctx.fillText(`Problems solved: ${s.correct}`, PW / 2, 480);
       ctx.fillText(`Right on the first try: ${s.firstTry}`, PW / 2, 550);
       ctx.fillText(`Treasures found: ${s.treasures.length}`, PW / 2, 620);
-      const p = this.progress;
-      ctx.fillText(`Castles conquered so far: ${p.castles}`, PW / 2, 690);
-      s.treasures.filter((t) => t !== 'Royal Crown').forEach((t, k, arr) => drawGem(ctx, PW / 2 + (k - (arr.length - 1) / 2) * 90, 800, 34, '#' + (TREASURES.find((x) => x[0] === t)?.[1] ?? 0xffffff).toString(16).padStart(6, '0')));
+      ctx.fillText(`Towers conquered so far: ${this.progress.castles}`, PW / 2, 690);
+      s.treasures.filter((t) => t !== 'Crown of Numeria').forEach((t, k, arr) => drawGem(ctx, PW / 2 + (k - (arr.length - 1) / 2) * 90, 800, 34, '#' + (TREASURES.find((x) => x[0] === t)?.[1] ?? 0xffffff).toString(16).padStart(6, '0')));
       vp.buttons = [{ id: 'again', label: 'Play Again', x: 262, y: 1000, w: 500, h: 150, kind: 'ok' }];
       const b = vp.buttons[0], hov = vp.hoverId === 'again';
       ctx.fillStyle = hov ? '#3fd57f' : '#23a55a'; roundRect(ctx, b.x, b.y, b.w, b.h, 30); ctx.fill();
@@ -741,12 +973,13 @@ export class Game {
     };
     vp.pressKey = (k) => { if (k === 'again') { this.sfx.click(); this.onPlayAgain?.(); } };
     vp.draw();
-    vp.mesh.position.set(0, this.panelY + 0.1, z + 0.2);
+    vp.mesh.position.set(0, y0 + this.panelH + 0.1, -this.D / 2 + 0.2);
+    vp.floor = TOP; vp.wallMounted = true; vp.lift = 0.1;
     vp.mesh.scale.setScalar(0.01);
     this.animate(0.5, (t) => vp.mesh.scale.setScalar(Math.max(0.01, t)), null, 1.5);
-    this.scene.add(vp.mesh); this.panels.push(vp);
+    this.world.add(vp.mesh); this.panels.push(vp);
     this.retirePanel(chest.panel, 1.2);
-    this.onVictory?.(s, pct);
+    this.onVictory?.(s);
   }
 
   saveProgress() {
@@ -759,67 +992,67 @@ export class Game {
 
   // ---------------------------------------------------------- effects
   animate(dur, fn, done = null, delay = 0) { this.anims.push({ t: -delay, dur, fn, done }); }
-  burst(pos, n = 40) {
+  burst(pos, n = 40, size = 0.035, speed = 3) {
     const cols = [0xffd54a, 0xff5c8a, 0x5ce1ff, 0x7dff6b, 0xc58bff, 0xffffff];
+    const geo = new THREE.PlaneGeometry(size, size);
     for (let k = 0; k < n; k++) {
-      const m = new THREE.Mesh(this._confGeo ??= new THREE.PlaneGeometry(0.035, 0.035), new THREE.MeshBasicMaterial({ color: cols[k % cols.length], side: THREE.DoubleSide }));
+      const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: cols[k % cols.length], side: THREE.DoubleSide, fog: false }));
       m.position.copy(pos);
-      m.userData.v = new THREE.Vector3((Math.random() - 0.5) * 3, 1.5 + Math.random() * 2.5, (Math.random() - 0.5) * 3);
-      m.userData.life = 1.6 + Math.random() * 0.8;
-      m.userData.spin = new THREE.Vector3(Math.random() * 10, Math.random() * 10, 0);
+      const v = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.3, Math.random() - 0.5).normalize().multiplyScalar(speed * (0.5 + Math.random() * 0.5));
+      if (speed <= 3) v.y = 1.5 + Math.random() * 2.5;
+      m.userData = { v, life: 1.6 + Math.random() * 0.8, spin: new THREE.Vector3(Math.random() * 10, Math.random() * 10, 0), floor: pos.y - 2 };
       this.scene.add(m); this.particles.push(m);
     }
   }
 
   // ---------------------------------------------------------- HUD
   makeHudTexture() {
-    this.hudCanvas = document.createElement('canvas'); this.hudCanvas.width = 256; this.hudCanvas.height = 96;
+    this.hudCanvas = document.createElement('canvas'); this.hudCanvas.width = 256; this.hudCanvas.height = 128;
     this.hudTex = new THREE.CanvasTexture(this.hudCanvas); this.hudTex.colorSpace = THREE.SRGBColorSpace;
-    this.hudMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.12, 0.045), new THREE.MeshBasicMaterial({ map: this.hudTex, transparent: true, depthTest: false }));
+    this.hudMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.12, 0.06), new THREE.MeshBasicMaterial({ map: this.hudTex, transparent: true, depthTest: false }));
     this.hudMesh.renderOrder = 10;
     this.hudMesh.position.set(0, 0.05, 0.02); this.hudMesh.rotation.x = -0.6;
-    this.updateHud();
   }
   updateHud() {
-    const n = this.stats.treasures.filter((t) => t !== 'Royal Crown').length;
-    const el = document.getElementById('hud'); if (el) el.textContent = `Gems: ${n}   Doors: ${this.reach}/${LAST}`;
-    if (!this.hudCanvas) return;
+    if (!this.stats) return;
+    const n = this.stats.treasures.filter((t) => t !== 'Crown of Numeria').length;
+    const el = document.getElementById('hud'); if (el) el.textContent = `Gems: ${n}   Floor: ${this.level + 1}/${FLOORS.length}`;
     const ctx = this.hudCanvas.getContext('2d');
-    ctx.clearRect(0, 0, 256, 96);
-    ctx.fillStyle = 'rgba(30,20,60,0.85)'; roundRect(ctx, 0, 0, 256, 96, 24); ctx.fill();
-    drawGem(ctx, 50, 50, 28, '#e0115f');
-    ctx.fillStyle = '#fff'; ctx.font = `bold 58px ${FONT}`; ctx.textBaseline = 'middle'; ctx.fillText(`× ${n}`, 100, 52);
+    ctx.clearRect(0, 0, 256, 128);
+    ctx.fillStyle = 'rgba(30,20,60,0.85)'; roundRect(ctx, 0, 0, 256, 128, 24); ctx.fill();
+    drawGem(ctx, 44, 42, 24, '#e0115f');
+    ctx.fillStyle = '#fff'; ctx.font = `bold 50px ${FONT}`; ctx.textBaseline = 'middle'; ctx.fillText(`× ${n}`, 84, 44);
+    ctx.font = `bold 36px ${FONT}`; ctx.fillStyle = '#ffe9a8'; ctx.fillText(`Floor ${this.level + 1}/${FLOORS.length}`, 22, 98);
     this.hudTex.needsUpdate = true;
   }
 
   // ---------------------------------------------------------- controls
   initControls() {
-    this.raycaster = new THREE.Raycaster(); this.raycaster.far = 30;
+    this.raycaster = new THREE.Raycaster(); this.raycaster.far = 6;
     this.pointers = [];
     this.makeHudTexture();
     const wandMat = new THREE.MeshLambertMaterial({ color: 0x5a3a8a }), starMat = new THREE.MeshBasicMaterial({ color: 0xffe066 });
-    const jointGeo = new THREE.SphereGeometry(1, 8, 6), jointMat = new THREE.MeshLambertMaterial({ color: 0xf1c8a8 });
+    const jointGeo = new THREE.SphereGeometry(1, 8, 6), jointMat = new THREE.MeshLambertMaterial({ color: 0xf1c8a8 }), tipMat = new THREE.MeshBasicMaterial({ color: 0xffe066 });
     for (let i = 0; i < 2; i++) {
       const c = this.renderer.xr.getController(i);
-      const rayGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1)]);
-      const ray = new THREE.Line(rayGeo, new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.7 }));
-      c.add(ray);
+      const ray = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1)]), new THREE.LineBasicMaterial({ color: 0xffe066, transparent: true, opacity: 0.8 }));
+      ray.visible = false; c.add(ray);
       const wand = new THREE.Group();
-      const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.012, 0.22, 8).rotateX(Math.PI / 2), wandMat); stick.position.z = -0.05; wand.add(stick);
-      const star = new THREE.Mesh(new THREE.OctahedronGeometry(0.02), starMat); star.position.z = -0.17; wand.add(star);
+      const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.012, 0.2, 8).rotateX(Math.PI / 2), wandMat); stick.position.z = -0.05; wand.add(stick);
+      const star = new THREE.Mesh(new THREE.OctahedronGeometry(0.018), starMat); star.position.z = -0.16; wand.add(star);
       c.add(wand);
-      const dot = new THREE.Mesh(new THREE.SphereGeometry(0.015, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffe066 }));
+      const dot = new THREE.Mesh(new THREE.SphereGeometry(0.012, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffe066 }));
       dot.visible = false; this.scene.add(dot);
-      const ptr = { c, ray, wand, dot, src: null, hit: null, turnArmed: true };
+      const ptr = { c, ray, wand, star, dot, src: null, hit: null, poke: new Map(), cool: 0 };
       c.addEventListener('connected', (e) => {
         ptr.src = e.data; wand.visible = !e.data.hand;
-        if (e.data.handedness === 'left') c.add(this.hudMesh);
+        if (e.data.handedness === 'left' && !e.data.hand) c.add(this.hudMesh);
       });
       c.addEventListener('disconnected', () => { ptr.src = null; dot.visible = false; });
       c.addEventListener('selectstart', () => this.select(ptr));
       this.rig.add(c);
       const hand = this.renderer.xr.getHand(i);
-      hand.userData.jointGeo = jointGeo; hand.userData.jointMat = jointMat;
+      hand.userData = { jointGeo, jointMat, tipMat };
       this.rig.add(hand);
       ptr.hand = hand;
       this.pointers.push(ptr);
@@ -837,7 +1070,7 @@ export class Game {
     document.addEventListener('mousemove', (e) => {
       if (document.pointerLockElement !== canvas) return;
       this.camera.rotation.y -= e.movementX * 0.0025;
-      this.camera.rotation.x = clamp(this.camera.rotation.x - e.movementY * 0.0025, -1.3, 1.3);
+      this.camera.rotation.x = clamp(this.camera.rotation.x - e.movementY * 0.0025, -1.4, 1.4);
     });
     window.addEventListener('keydown', (e) => {
       const k = e.key;
@@ -853,10 +1086,9 @@ export class Game {
     window.addEventListener('keyup', (e) => this.keys.delete(e.key.toLowerCase()));
   }
 
-  // The nearest visible, unsolved panel within reach (used for keyboard typing).
   activePanel() {
     const head = this.headPos();
-    let best = null, bd = 4.5;
+    let best = null, bd = 3.5;
     for (const p of this.panels) {
       if (!p.mesh.visible || (p.state !== 'solving' && p.state !== 'victory')) continue;
       const d = p.mesh.getWorldPosition(new THREE.Vector3()).distanceTo(head);
@@ -867,25 +1099,16 @@ export class Game {
 
   headPos() { return this.camera.getWorldPosition(new THREE.Vector3()); }
 
-  // Can the player's head stand at world (x, z)?
-  canStand(x, z) {
-    const m = 0.35;
-    for (let j = 0; j <= this.reach; j++) if (Math.abs(x) < W / 2 - m && z < zc(j) + L / 2 - m - (j ? WALL_T : 0) && z > zc(j) - L / 2 + m) return true;
-    for (let j = 0; j < this.reach; j++) if (Math.abs(x) < DOOR_W / 2 - 0.25 && Math.abs(z - (wallZ(j) - WALL_T / 2)) < WALL_T / 2 + m + 0.05) return true;
-    return false;
-  }
-
   castFrom(origin, dir) {
     this.raycaster.set(origin, dir);
-    const targets = [...this.blockers, ...this.floors];
+    const targets = [...this.blockers];
     for (const p of this.panels) if (p.mesh.visible) targets.push(p.mesh);
-    for (const ch of this.chests) if (!ch.opened && !ch.big) ch.group.traverse((o) => { if (o.isMesh && o !== ch.q) targets.push(o); });
+    for (const ch of this.chests) if (!ch.opened && !ch.big) ch.group.traverse((o) => { if (o.isMesh && o.userData.chest) targets.push(o); });
     const hit = this.raycaster.intersectObjects(targets, false)[0];
     if (!hit) return null;
     const o = hit.object;
     if (o.userData.panel) return { type: 'panel', panel: o.userData.panel, uv: hit.uv, point: hit.point, distance: hit.distance };
     if (o.userData.chest) return { type: 'chest', chest: o.userData.chest, point: hit.point, distance: hit.distance };
-    if (o.userData.floor) return { type: 'floor', point: hit.point, ok: this.canStand(hit.point.x, hit.point.z), distance: hit.distance };
     return { type: 'block', point: hit.point, distance: hit.distance };
   }
 
@@ -894,127 +1117,116 @@ export class Game {
     const h = ptr.hit;
     if (!h) return;
     if (h.type === 'panel') h.panel.press(h.uv);
-    else if (h.type === 'chest' && h.distance < 7) this.openChestPanel(h.chest);
-    else if (h.type === 'floor' && h.ok) this.teleport(h.point);
+    else if (h.type === 'chest') this.openChestPanel(h.chest);
   }
 
-  teleport(p) {
-    const head = this.headPos();
-    this.rig.position.x += p.x - head.x;
-    this.rig.position.z += p.z - head.z;
-    this.sfx.teleport();
+  // Finger / wand-tip touch: press a panel button when the tip pushes through
+  // the panel's surface from the front. Returns the hovered panel + uv.
+  poke(ptr, tip, dt) {
+    ptr.cool = Math.max(0, ptr.cool - dt);
+    let hover = null;
+    for (const p of this.panels) {
+      if (!p.mesh.visible || p.mesh.scale.x < 0.9) { ptr.poke.delete(p); continue; }
+      const l = p.mesh.worldToLocal(tip.clone());
+      const inside = Math.abs(l.x) < p.w / 2 && Math.abs(l.y) < p.h / 2;
+      const prev = ptr.poke.has(p) ? ptr.poke.get(p) : l.z;
+      ptr.poke.set(p, l.z);
+      if (!inside) continue;
+      const uv = new THREE.Vector2(l.x / p.w + 0.5, l.y / p.h + 0.5);
+      if (l.z < 0.1 && l.z > -0.08) hover = { panel: p, uv };
+      if (prev > 0.005 && l.z <= 0.005 && l.z > -0.08 && ptr.cool === 0) {
+        const id = p.buttonAt(uv);
+        if (id) { p.pressKey(id); ptr.cool = 0.3; this.haptic(ptr); }
+      }
+    }
+    for (const ch of this.chests) {
+      if (ch.opened || ch.panel || ch.big) continue;
+      ch.box ??= new THREE.Box3();
+      ch.box.setFromObject(ch.group.children[0]).expandByScalar(0.08);
+      if (ch.box.containsPoint(tip)) { this.openChestPanel(ch); this.haptic(ptr); }
+    }
+    return hover;
   }
 
-  moveBy(dx, dz) {
-    const head = this.headPos();
-    if (this.canStand(head.x + dx, head.z)) this.rig.position.x += dx;
-    if (this.canStand(head.x + (this.canStand(head.x + dx, head.z) ? dx : 0), head.z + dz)) this.rig.position.z += dz;
-  }
-
-  snapTurn(angle) {
-    const head = this.headPos();
-    const v = this.rig.position.clone().sub(head).applyAxisAngle(new THREE.Vector3(0, 1, 0), angle);
-    this.rig.position.copy(head).add(v).setY(this.rig.position.y);
-    this.rig.rotation.y += angle;
-  }
+  haptic(ptr) { try { ptr.src?.gamepad?.hapticActuators?.[0]?.pulse?.(0.6, 40); } catch { /* optional */ } }
 
   updatePointers(dt) {
     const hovered = new Map();
-    const xr = this.renderer.xr.isPresenting;
     const tmpM = new THREE.Matrix4(), o = new THREE.Vector3(), d = new THREE.Vector3();
-    let markerShown = false;
-    const handle = (ptr, origin, dir) => {
-      const hit = this.castFrom(origin, dir); ptr.hit = hit;
-      if (hit?.type === 'panel') hovered.set(hit.panel, hit.uv);
-      if (hit?.type === 'floor' && hit.ok && !markerShown) { this.marker.position.copy(hit.point).setY(0.02); this.marker.visible = true; markerShown = true; }
-      return hit;
-    };
-    if (xr) {
+    if (this.renderer.xr.isPresenting) {
       for (const ptr of this.pointers) {
         const c = ptr.c;
         if (!ptr.src) { ptr.ray.visible = false; continue; }
+        // touch
+        let tip = null;
+        const hand = ptr.hand;
+        if (ptr.src.hand && hand.joints?.['index-finger-tip']) tip = hand.joints['index-finger-tip'].getWorldPosition(new THREE.Vector3());
+        else if (!ptr.src.hand) tip = ptr.star.getWorldPosition(new THREE.Vector3());
+        const touch = tip ? this.poke(ptr, tip, dt) : null;
+        if (touch) hovered.set(touch.panel, touch.uv);
+        // pointing ray (only drawn when it lands on something useful)
         tmpM.identity().extractRotation(c.matrixWorld);
         o.setFromMatrixPosition(c.matrixWorld); d.set(0, 0, -1).applyMatrix4(tmpM);
-        const hit = handle(ptr, o, d);
-        const len = hit ? hit.distance : 5;
-        ptr.ray.visible = true; ptr.ray.scale.z = len;
-        ptr.ray.material.color.setHex(hit?.type === 'panel' || hit?.type === 'chest' ? 0xffe066 : hit?.type === 'floor' && hit.ok ? 0x66e0ff : 0xffffff);
-        ptr.dot.visible = !!hit; if (hit) ptr.dot.position.copy(hit.point);
-        // thumbsticks
-        const gp = ptr.src.gamepad;
-        if (gp && gp.axes.length >= 4) {
-          const ax = gp.axes[2], ay = gp.axes[3];
-          if (ptr.src.handedness === 'left' && this.opts.smooth && Math.hypot(ax, ay) > 0.2) {
-            const fwd = new THREE.Vector3(); this.camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
-            const right = new THREE.Vector3(-fwd.z, 0, fwd.x), sp = 1.6 * dt;
-            this.moveBy((fwd.x * -ay + right.x * ax) * sp, (fwd.z * -ay + right.z * ax) * sp);
-          }
-          if (ptr.src.handedness === 'right') {
-            if (Math.abs(ax) > 0.7 && ptr.turnArmed) { this.snapTurn(ax > 0 ? -Math.PI / 6 : Math.PI / 6); ptr.turnArmed = false; }
-            if (Math.abs(ax) < 0.3) ptr.turnArmed = true;
-          }
-        }
+        const hit = touch ? null : this.castFrom(o, d);
+        ptr.hit = hit;
+        const useful = hit && (hit.type === 'panel' || hit.type === 'chest');
+        if (useful && hit.type === 'panel') hovered.set(hit.panel, hit.uv);
+        ptr.ray.visible = !!useful; if (useful) ptr.ray.scale.z = hit.distance;
+        ptr.dot.visible = !!useful; if (useful) ptr.dot.position.copy(hit.point);
         // hand joints
-        const hand = ptr.hand;
-        if (hand?.joints) for (const j of Object.values(hand.joints)) if (!j.userData.mesh) {
-          const m = new THREE.Mesh(hand.userData.jointGeo, hand.userData.jointMat); m.scale.setScalar(j.jointRadius || 0.008); j.add(m); j.userData.mesh = m;
+        if (hand?.joints) for (const [name, j] of Object.entries(hand.joints)) if (!j.userData.mesh) {
+          const m = new THREE.Mesh(hand.userData.jointGeo, name === 'index-finger-tip' ? hand.userData.tipMat : hand.userData.jointMat);
+          m.scale.setScalar(j.jointRadius || 0.008); j.add(m); j.userData.mesh = m;
         }
       }
     } else {
       this.camera.getWorldPosition(o); this.camera.getWorldDirection(d);
-      handle(this.desktopPtr, o, d);
+      this.desktopPtr.hit = this.castFrom(o, d);
       const h = this.desktopPtr.hit;
-      document.getElementById('crosshair')?.classList.toggle('active', !!h && h.type !== 'block' && (h.type !== 'floor' || h.ok));
+      if (h?.type === 'panel') hovered.set(h.panel, h.uv);
+      document.getElementById('crosshair')?.classList.toggle('active', !!h && h.type !== 'block');
     }
-    if (!markerShown) this.marker.visible = false;
     for (const p of this.panels) p.hover(hovered.get(p) || null);
   }
 
   // ---------------------------------------------------------- frame loop
   frame() {
     const dt = Math.min(this.clock.getDelta(), 0.05), t = this.clock.elapsedTime;
+    if (!this.world) { this.renderer.render(this.scene, this.camera); return; }
     const xr = this.renderer.xr.isPresenting;
-    // desktop walking
-    if (!xr) {
+    if (!xr) { // desktop walking, kept inside the room
       const f = (this.keys.has('w') || this.keys.has('arrowup') ? 1 : 0) - (this.keys.has('s') || this.keys.has('arrowdown') ? 1 : 0);
       const s = (this.keys.has('d') ? 1 : 0) - (this.keys.has('a') ? 1 : 0);
       if (this.keys.has('arrowleft')) this.camera.rotation.y += 1.8 * dt;
       if (this.keys.has('arrowright')) this.camera.rotation.y -= 1.8 * dt;
       if (f || s) {
-        const yaw = this.camera.rotation.y, sp = 2.4 * dt;
-        this.moveBy((-Math.sin(yaw) * f + Math.cos(yaw) * s) * sp, (-Math.cos(yaw) * f - Math.sin(yaw) * s) * sp);
+        const yaw = this.camera.rotation.y, sp = 1.6 * dt, mx = this.W / 2 - 0.25, mz = this.D / 2 - 0.25;
+        this.rig.position.x = clamp(this.rig.position.x + (-Math.sin(yaw) * f + Math.cos(yaw) * s) * sp, -mx, mx);
+        this.rig.position.z = clamp(this.rig.position.z + (-Math.cos(yaw) * f - Math.sin(yaw) * s) * sp, -mz, mz);
       }
     }
-    // panels follow the player's eye height
     const head = this.headPos();
-    this.panelY += (clamp(head.y - 0.15, 0.85, 1.45) - this.panelY) * Math.min(1, dt * 2);
-    for (const p of this.panels) { if (p.fixedHeight) p.mesh.position.y = this.panelY; p.update(); }
-    // animations
+    // panels sit a little below the player's eyes so the keypad is in easy reach
+    const eye = head.y - this.rig.position.y;
+    this.panelH += (clamp(eye - 0.3, 0.75, 1.3) - this.panelH) * Math.min(1, dt * 2);
+    for (const p of this.panels) { if (p.wallMounted) p.mesh.position.y = fy(p.floor) + this.panelH + (p.lift || 0); p.update(); }
+    this.updateLift(dt, head);
     for (const a of this.anims) { a.t += dt; if (a.t >= 0) a.fn(Math.min(1, a.t / a.dur)); }
     for (const a of this.anims.filter((a) => a.t >= a.dur)) a.done?.();
     this.anims = this.anims.filter((a) => a.t < a.dur);
     for (const m of this.particles) {
-      m.userData.v.y -= 4 * dt; m.position.addScaledVector(m.userData.v, dt);
-      m.rotation.x += m.userData.spin.x * dt; m.rotation.y += m.userData.spin.y * dt;
-      m.userData.life -= dt; if (m.userData.life <= 0 || m.position.y < 0) { this.scene.remove(m); m.material.dispose(); }
+      const u = m.userData;
+      u.v.y -= 4 * dt; m.position.addScaledVector(u.v, dt);
+      m.rotation.x += u.spin.x * dt; m.rotation.y += u.spin.y * dt;
+      u.life -= dt; if (u.life <= 0) { this.scene.remove(m); m.material.dispose(); }
     }
-    this.particles = this.particles.filter((m) => m.userData.life > 0 && m.position.y >= 0);
-    // ambience
+    this.particles = this.particles.filter((m) => m.userData.life > 0);
     const fl = 0.85 + 0.15 * Math.sin(t * 13) * Math.sin(t * 7.3);
-    this.flameMat.color.setRGB(1, 0.55 + 0.1 * fl, 0.2);
-    this.roomLights.forEach((l, i) => { l.intensity = 18 * (0.92 + 0.08 * Math.sin(t * 9 + i * 2)); });
-    for (const ch of this.chests) if (!ch.opened) { ch.q.position.y = 1.15 + Math.sin(t * 2 + ch.i) * 0.06; ch.q.lookAt(head); }
-    for (const o of this.floaters) { o.position.y = o.userData.base + Math.sin(t + o.userData.phase) * 0.25; o.rotation.y += dt; }
+    this.mats.flame.color.setRGB(1, 0.55 + 0.1 * fl, 0.2);
+    this.lights.forEach((l, i) => { if (l.intensity > 0) l.intensity = 6 * (0.92 + 0.08 * Math.sin(t * 9 + i * 2)); });
+    for (const ch of this.chests) if (!ch.opened && ch.q.visible) { ch.q.position.y = 1.3 + Math.sin(t * 2 + ch.i) * 0.06; ch.q.lookAt(head); }
+    for (const o of this.floaters) { o.position.y = o.userData.base + Math.sin(t + o.userData.phase) * 0.15; o.rotation.y += dt; }
     this.updatePointers(dt);
     this.renderer.render(this.scene, this.camera);
-  }
-
-  async enterVR() {
-    const session = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking'] });
-    this.camera.rotation.set(0, 0, 0);
-    this.camera.position.set(0, 0, 0);
-    await this.renderer.xr.setSession(session);
-    this.sfx.resume();
-    session.addEventListener('end', () => { this.camera.position.set(0, 1.3, 0); this.onExitVR?.(); });
   }
 }

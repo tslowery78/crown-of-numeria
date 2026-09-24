@@ -1,6 +1,11 @@
 # Crown of Numeria (Meta Quest 3)
 
-Crown of Numeria is a WebXR math castle that runs in the Quest 3 browser, so there's nothing to install or sideload. There are six rooms (Entrance Hall, Great Hall, Royal Library, Knights' Armory, Crystal Tower, Throne Room). Every door has a magic lock that opens after the player solves math problems. Each room also has a treasure chest that opens with one more problem. Solving the final problems in the Throne Room wins the Crown of Numeria.
+Crown of Numeria is a room-scale WebXR math tower that runs in the Quest 3 browser. Each floor of the castle tower is one room the size of your real play area, so the girls physically walk around it.
+
+- **Floors:** there are six, in this order: Entrance Hall, Great Hall, Royal Library, Knights' Armory, Crystal Chamber, and the open-air Tower Top.
+- **Magic Lock:** each floor has one on the north wall. Solving its problems dissolves the hatch in the ceiling. Standing on the glowing square in the middle of the room then lifts the player up to the next floor, so nobody has to walk outside the play area.
+- **Treasure chests:** each floor has one in a corner. Touch it to get a bonus problem and a gem.
+- **Tower Top:** the final lock opens the Crown of Numeria, and fireworks go off over the kingdom.
 
 Problems are generated for **Bluebonnet Learning Grade 2 (Modules 1–8)** and **Grade 4 (Modules 1–7)**, following the modules in TEA's scope and sequence. On the setup screen you can also type in the actual homework problems, and those come first.
 
@@ -20,16 +25,24 @@ To publish changes: `git commit` and `git push`, and GitHub Pages updates within
 ### Offline or local option
 Run `./serve.sh` on the Mac and open the https://<ip>:8443 address it prints. You'll need to accept a certificate warning once.
 
+## Room setup
+
+1. Clear the space and set a **room-scale** Guardian. A stationary boundary won't work because she needs to walk around.
+2. Measure the clear square inside the Guardian and pick the next size down on the setup screen (2, 2.5, 3, 3.5 or 4 m). You can also add `&room=3` to a player's bookmark link.
+3. She stands in the **middle** of the space and faces the wall that should hold the Magic Lock, then taps Enter. The virtual room is centred on that spot.
+
+"Try automatic Guardian fit" reads the boundary through WebXR's `bounded-floor`. Other developers have reported that Quest 3 returns an empty or undersized boundary this way, so it's experimental. If no boundary comes back, the game falls back to 2.5 m.
+
 ## Controls
 
-| Action | Quest controllers | Hands (no controllers) | Desktop |
+| Action | Hands | Controllers | Desktop |
 |---|---|---|---|
-| Press a button | point + trigger | point + pinch | click |
-| Open a chest | point at chest + trigger | pinch | click |
-| Move | teleport (point at floor + trigger) or left stick | teleport | WASD / arrows |
-| Turn | right stick (30° snaps) | turn your body | mouse |
+| Press a button | poke it with your finger (or point + pinch) | poke it with the magic-wand tip (or point + trigger) | click |
+| Open a chest | touch it | touch it with the wand, or point + trigger | click |
+| Move | walk | walk | WASD / arrows + mouse |
+| Go up a floor | stand on the glowing square | same | walk onto the square |
 
-A gem counter sits on the left controller. **Read** speaks the problem aloud and **Hint** gives a hint. Answering wrong gives "try again" the first time and a hint the second time. On the third miss the game shows the answer and serves a new problem, which doesn't count toward the lock.
+There's no thumbstick movement or turning, so the virtual walls always line up with the real room. The ride up takes about 5 seconds and pauses if she steps off the square. The gem and floor counter sits on the left controller.
 
 ## Adding homework
 
@@ -48,7 +61,7 @@ Answers are checked by value, so `7/8`, `0.875`, `4.5` and `4.50` all match corr
 ## Files
 
 - `index.html`: setup screen
-- `js/game.js`: castle, VR input, puzzle panels
+- `js/game.js`: tower floors, magic lift, touch + pointer input, puzzle panels
 - `js/problems.js`: grade 2/4 problem generators, answer checking, homework parser
 - `vendor/three/`: three.js r186, bundled so the game doesn't need a CDN
 - `serve.sh`: local https server
