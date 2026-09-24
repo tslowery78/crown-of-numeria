@@ -1,0 +1,10 @@
+{
+  "name": "Crown of Numeria",
+  "short_name": "Numeria",
+  "description": "A VR math castle adventure for Bluebonnet Grade 2 and Grade 4 math.",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#120c1c",
+  "theme_color": "#2b1a4a",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}

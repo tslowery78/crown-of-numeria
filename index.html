@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Crown of Numeria</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#2b1a4a">
+<style>
+  :root { --gold: #e0b84a; --ink: #1a1030; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: #120c1c; color: #fff; overflow: hidden; }
+  #setup { position: fixed; inset: 0; overflow: auto; background: radial-gradient(circle at 50% 0%, #3a2466, #120c1c 70%); z-index: 5; padding: 24px 16px 60px; }
+  .card { max-width: 760px; margin: 0 auto; }
+  h1 { text-align: center; font-size: 44px; margin: 8px 0 4px; color: #ffd54a; text-shadow: 0 3px 0 #7a4a00; }
+  .sub { text-align: center; color: #d8c8ff; margin: 0 0 20px; }
+  section { background: rgba(255,255,255,0.07); border: 2px solid rgba(224,184,74,0.4); border-radius: 18px; padding: 16px 18px; margin: 14px 0; }
+  h2 { margin: 0 0 10px; font-size: 20px; color: #ffe9a8; }
+  label { display: block; margin: 6px 0; font-size: 17px; }
+  input[type=text], select, textarea { font: inherit; font-size: 18px; border-radius: 10px; border: 2px solid #6a54b8; padding: 8px 10px; background: #fff; color: var(--ink); }
+  input[type=text] { width: 100%; }
+  textarea { width: 100%; min-height: 150px; font-family: ui-monospace, Menlo, monospace; font-size: 15px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .grade { flex: 1; min-width: 150px; padding: 18px; font-size: 24px; font-weight: bold; border-radius: 16px; border: 3px solid #6a54b8; background: #2b1a4a; color: #fff; cursor: pointer; }
+  .grade.on { background: #6a54b8; border-color: #ffd54a; }
+  .profiles button { padding: 10px 14px; border-radius: 12px; border: 2px solid var(--gold); background: #3b2412; color: #ffe9a8; font-size: 17px; cursor: pointer; }
+  .mods label { display: flex; gap: 8px; align-items: center; }
+  .mods input { width: 22px; height: 22px; }
+  .go { display: block; width: 100%; padding: 20px; margin-top: 12px; font-size: 26px; font-weight: bold; border-radius: 18px; border: 0; cursor: pointer; }
+  #vrBtn { background: #23a55a; color: #fff; }
+  #vrBtn:disabled { background: #555; color: #bbb; cursor: not-allowed; }
+  #deskBtn { background: #3d2f6b; color: #fff; font-size: 20px; padding: 14px; }
+  .note { color: #cfc2f0; font-size: 14px; margin: 6px 0; }
+  .err { color: #ffb3b3; font-size: 14px; white-space: pre-line; }
+  .ok { color: #9dffbe; font-size: 14px; }
+  small.link { cursor: pointer; text-decoration: underline; color: #ffe9a8; }
+  #hud { position: fixed; top: 12px; left: 12px; z-index: 3; background: rgba(30,20,60,0.8); padding: 8px 14px; border-radius: 12px; font-weight: bold; display: none; }
+  #deskHelp { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); z-index: 3; background: rgba(30,20,60,0.8); padding: 8px 14px; border-radius: 12px; font-size: 14px; display: none; text-align: center; }
+  #crosshair { position: fixed; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; border: 2px solid rgba(255,255,255,0.7); border-radius: 50%; z-index: 3; display: none; pointer-events: none; }
+  #crosshair.active { border-color: #ffe066; background: rgba(255,224,102,0.5); }
+</style>
+</head>
+<body>
+<div id="setup"><div class="card">
+  <h1>👑 Crown of Numeria</h1>
+  <p class="sub">A math castle adventure. Solve the magic locks, open the treasure chests, and claim the crown!</p>
+  <section id="quick" style="display:none;text-align:center">
+    <h2 id="quickHi" style="font-size:28px"></h2>
+    <button class="go" id="quickVr" disabled>Checking for VR…</button>
+    <p class="note"><small class="link" id="quickEdit">change settings or add homework</small></p>
+  </section>
+  <div id="settingsBody">
+
+  <section>
+    <h2>Who is exploring?</h2>
+    <div class="row profiles" id="profiles"></div>
+    <label>Explorer name <input type="text" id="name" maxlength="20" placeholder="Type your name"></label>
+    <div class="row" style="margin-top:8px">
+      <button class="grade" data-grade="2">2nd Grade</button>
+      <button class="grade" data-grade="4">4th Grade</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Which Bluebonnet math modules?</h2>
+    <p class="note">Pick the module(s) you are working on in class. <small class="link" id="allMods">all</small> · <small class="link" id="noMods">none</small></p>
+    <div class="mods" id="mods"></div>
+  </section>
+
+  <section>
+    <h2>Homework problems (optional)</h2>
+    <p class="note">One problem per line: <b>question | answer</b>. For word answers add choices: <b>Is 17 even or odd? | odd | even; odd</b>. These come first, then the game makes more practice problems.</p>
+    <textarea id="homework" spellcheck="false" placeholder="245 + 367 = ? | 612&#10;Is 17 even or odd? | odd | even; odd"></textarea>
+    <div id="hwStatus"></div>
+    <label><input type="checkbox" id="hwOnly"> Only use my homework problems (repeat them)</label>
+  </section>
+
+  <section>
+    <h2>Settings</h2>
+    <label>Problems per door
+      <select id="perDoor"><option>1</option><option selected>2</option><option>3</option><option>4</option><option>5</option></select>
+    </label>
+    <label><input type="checkbox" id="smooth" checked> Walk with the left thumbstick (turn off if it makes you dizzy; you can still teleport)</label>
+  </section>
+
+  <button class="go" id="vrBtn" disabled>Checking for VR…</button>
+  <button class="go" id="deskBtn">Play on this screen (mouse + keyboard)</button>
+  </div>
+  <p class="note" id="vrNote"></p>
+</div></div>
+
+<div id="hud"></div>
+<div id="crosshair"></div>
+<div id="deskHelp">Click to look around · WASD / arrows to walk · click buttons, chests, or the floor · type numbers + Enter · H = hint · R = read aloud · Esc = free mouse</div>
+
+<script type="importmap">
+{ "imports": { "three": "./vendor/three/three.module.js", "three/addons/": "./vendor/three/addons/" } }
+</script>
+<script type="module">
+import { Game } from './js/game.js';
+import { MODULES, parseHomework } from './js/problems.js';
+
+const $ = (id) => document.getElementById(id);
+const store = { get: (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } }, set: (k, v) => localStorage.setItem(k, JSON.stringify(v)) };
+let grade = null;
+
+function profileKey(name) { return `mathcastle.settings.${(name || 'explorer').toLowerCase()}`; }
+
+function renderMods(selected) {
+  $('mods').innerHTML = '';
+  if (!grade) { $('mods').innerHTML = '<p class="note">Choose a grade first.</p>'; return; }
+  for (const m of MODULES[grade]) {
+    const lab = document.createElement('label');
+    lab.innerHTML = `<input type="checkbox" value="${m.id}"> ${m.name}`;
+    lab.querySelector('input').checked = !selected || selected.includes(m.id);
+    $('mods').appendChild(lab);
+  }
+}
+function setGrade(g, selected) {
+  grade = g;
+  document.querySelectorAll('.grade').forEach((b) => b.classList.toggle('on', Number(b.dataset.grade) === g));
+  renderMods(selected);
+  checkHomework();
+}
+function checkHomework() {
+  const txt = $('homework').value;
+  if (!txt.trim() || !grade) { $('hwStatus').innerHTML = ''; return; }
+  const { problems, errors } = parseHomework(txt, grade);
+  $('hwStatus').innerHTML = `<div class="ok">${problems.length} homework problem${problems.length === 1 ? '' : 's'} ready for grade ${grade}.</div>` + (errors.length ? `<div class="err">${errors.join('\n')}</div>` : '');
+}
+function loadProfile(name) {
+  const s = store.get(profileKey(name), null);
+  if (!s) return;
+  $('name').value = s.name; $('homework').value = s.homework || ''; $('hwOnly').checked = !!s.homeworkOnly;
+  $('perDoor').value = String(s.perDoor || 2); $('smooth').checked = s.smooth !== false;
+  setGrade(s.grade, s.moduleIds);
+}
+function renderProfiles() {
+  const names = store.get('mathcastle.profiles', []);
+  $('profiles').innerHTML = '';
+  for (const n of names) {
+    const s = store.get(profileKey(n), {}), p = store.get(`mathcastle.progress.${n.toLowerCase()}`, null);
+    const b = document.createElement('button');
+    b.textContent = `${n} (grade ${s.grade})${p ? ` · 👑 ${p.castles} · 💎 ${p.gems}` : ''}`;
+    b.onclick = () => loadProfile(n);
+    $('profiles').appendChild(b);
+  }
+}
+function collect() {
+  const name = $('name').value.trim() || 'Explorer';
+  if (!grade) { alert('Pick 2nd grade or 4th grade first.'); return null; }
+  const moduleIds = [...document.querySelectorAll('#mods input:checked')].map((i) => i.value);
+  if (!moduleIds.length && !$('hwOnly').checked) { alert('Pick at least one module.'); return null; }
+  const settings = { name, grade, moduleIds, perDoor: Number($('perDoor').value), smooth: $('smooth').checked, homework: $('homework').value, homeworkOnly: $('hwOnly').checked };
+  store.set(profileKey(name), settings);
+  const names = store.get('mathcastle.profiles', []);
+  if (!names.some((n) => n.toLowerCase() === name.toLowerCase())) store.set('mathcastle.profiles', [...names, name]);
+  store.set('mathcastle.last', name);
+  const hw = parseHomework(settings.homework, grade).problems;
+  return { ...settings, homework: hw };
+}
+function start(vr) {
+  const opts = collect();
+  if (!opts) return;
+  $('setup').style.display = 'none';
+  const game = window.__castle = new Game(opts);
+  game.onPlayAgain = () => { sessionStorage.setItem('mathcastle.autostart', vr ? 'vr' : 'desk'); location.reload(); };
+  game.onExitVR = () => { $('hud').style.display = 'block'; $('deskHelp').style.display = 'block'; $('crosshair').style.display = 'block'; };
+  if (vr) game.enterVR().catch((e) => { alert(`Could not start VR: ${e.message}`); game.onExitVR(); });
+  else game.onExitVR();
+  game.updateHud();
+}
+
+document.querySelectorAll('.grade').forEach((b) => (b.onclick = () => setGrade(Number(b.dataset.grade))));
+$('allMods').onclick = () => document.querySelectorAll('#mods input').forEach((i) => (i.checked = true));
+$('noMods').onclick = () => document.querySelectorAll('#mods input').forEach((i) => (i.checked = false));
+$('homework').addEventListener('input', checkHomework);
+$('deskBtn').onclick = () => start(false);
+$('vrBtn').onclick = () => start(true);
+
+renderProfiles();
+renderMods();
+// Bookmark links like ?player=Ava&grade=2 jump straight to that explorer.
+const params = new URLSearchParams(location.search);
+const qp = params.get('player'), qg = Number(params.get('grade'));
+if (qp) {
+  if (!store.get(profileKey(qp), null) && (qg === 2 || qg === 4)) {
+    store.set(profileKey(qp), { name: qp, grade: qg, moduleIds: MODULES[qg].map((m) => m.id), perDoor: 2, smooth: true, homework: '', homeworkOnly: false });
+    const names = store.get('mathcastle.profiles', []);
+    if (!names.some((n) => n.toLowerCase() === qp.toLowerCase())) store.set('mathcastle.profiles', [...names, qp]);
+    renderProfiles();
+  }
+  if (store.get(profileKey(qp), null)) {
+    loadProfile(qp);
+    $('quick').style.display = 'block'; $('settingsBody').style.display = 'none';
+    $('quickHi').textContent = `Ready, ${store.get(profileKey(qp)).name}?`;
+    $('quickEdit').onclick = () => { $('settingsBody').style.display = 'block'; };
+    $('quickVr').onclick = () => start(true);
+  }
+} else {
+  const last = store.get('mathcastle.last', null);
+  if (last) loadProfile(last);
+}
+if (!$('homework').value) fetch('homework.txt').then((r) => (r.ok ? r.text() : '')).then((t) => { if (t && !$('homework').value) { $('homework').value = t; checkHomework(); } }).catch(() => {});
+
+if (navigator.xr) {
+  navigator.xr.isSessionSupported('immersive-vr').then((ok) => {
+    for (const id of ['vrBtn', 'quickVr']) { $(id).disabled = !ok; $(id).textContent = ok ? '🥽 Enter the Castle in VR' : 'VR not available here'; }
+    if (!ok) $('vrNote').textContent = 'Open this page in the Meta Quest browser to play in VR.';
+  });
+} else {
+  $('vrBtn').textContent = $('quickVr').textContent = 'VR not available here';
+  $('vrNote').textContent = window.isSecureContext ? 'Open this page in the Meta Quest browser to play in VR.' : 'VR needs a secure (https) address. See README for how to serve the game.';
+}
+const auto = sessionStorage.getItem('mathcastle.autostart');
+if (auto) { sessionStorage.removeItem('mathcastle.autostart'); if (auto === 'desk') start(false); }
+</script>
+</body>
+</html>

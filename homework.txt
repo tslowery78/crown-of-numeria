@@ -1,0 +1,13 @@
+# Homework problems for Crown of Numeria.
+# One per line:   question | answer
+# Word answers need choices:   question | answer | choice; choice; choice
+# Put problems under [grade 2] or [grade 4] so each girl only gets her own.
+# Delete the examples below and type in this week's homework.
+
+[grade 2]
+245 + 367 = ? | 612
+Is 17 even or odd? | odd | even; odd
+
+[grade 4]
+3,406 x 7 = ? | 23842
+3/8 + 4/8 = ? | 7/8
