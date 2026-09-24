@@ -7,6 +7,18 @@ Crown of Numeria is a room-scale WebXR math tower that runs in the Quest 3 brows
 - **Treasure chests:** each floor has one in a corner. Touch it to get a bonus problem and a gem.
 - **Tower Top:** the final lock opens the Crown of Numeria, and fireworks go off over the kingdom.
 
+**Things to do on the way up:**
+
+- **Heroes:** each girl picks a hero on the setup screen: a princess, knight, wizard, fairy or explorer, with her own outfit colour, hairstyle, hair colour and skin tone. Magic Mirrors on floors 1 and 4 and a Royal Mirror on the roof let her see herself. At the end the crown lands on her head.
+- **Pick up and throw:** there's a bouncy ball, a rubber duck, a teddy bear, apples, a goblet, books, paper airplanes that glide, and a knight's helmet she can put on. Items thrown out of a window fall to the courtyard and then reappear back in the room.
+- **Mini-games:**
+  - toss apples into the basket in the Great Hall;
+  - knight bowling in the Armory, which does the subtraction for her, e.g. "7 down! 10 − 7 = 3 standing";
+  - pop bubbles from the cauldron and tap crystals that chime notes in the Crystal Chamber.
+- **Creatures:** a sleepy cat that purrs and meows when petted, an owl that turns its head to follow her, a friendly dragon circling the tower past the windows, bird flocks, and a hot-air balloon.
+- **Windows:** big arched windows look out on the kingdom: the courtyard and towers, a village with a windmill, a river and bridge, forests and mountains. The view gets higher on every floor.
+- **Sound:** soft generated music changes mood on each floor, and short musical cues play for correct answers, unlocking, chests, the lift and the victory. Sound effects are positioned in 3D, with wind at the windows, torches crackling and birds outside. Music volume is set on the setup screen.
+
 Problems are generated for **Bluebonnet Learning Grade 2 (Modules 1–8)** and **Grade 4 (Modules 1–7)**, following the modules in TEA's scope and sequence. On the setup screen you can also type in the actual homework problems, and those come first.
 
 ## Launch on the Quest
@@ -41,6 +53,7 @@ Run `./serve.sh` on the Mac and open the https://<ip>:8443 address it prints. Yo
 | Open a chest | touch it | touch it with the wand, or point + trigger | click |
 | Move | walk | walk | WASD / arrows + mouse |
 | Go up a floor | stand on the glowing square | same | walk onto the square |
+| Grab / throw | pinch near it, let go while moving | grip (or trigger) near it; point + trigger pulls it to your hand | click it, then click again to throw |
 
 There's no thumbstick movement or turning, so the virtual walls always line up with the real room. The ride up takes about 5 seconds and pauses if she steps off the square. The gem and floor counter sits on the left controller.
 
@@ -61,7 +74,10 @@ Answers are checked by value, so `7/8`, `0.875`, `4.5` and `4.50` all match corr
 ## Files
 
 - `index.html`: setup screen
-- `js/game.js`: tower floors, magic lift, touch + pointer input, puzzle panels
+- `js/game.js`: tower floors, windows and kingdom, mirrors, magic lift, touch/grab input, puzzle panels
+- `js/props.js`: grab-and-throw physics, mini-games, creatures
+- `js/avatar.js`: hero avatars and setup preview
+- `js/audio.js`: procedural music, cues and 3D sound effects
 - `js/problems.js`: grade 2/4 problem generators, answer checking, homework parser
 - `vendor/three/`: three.js r186, bundled so the game doesn't need a CDN
 - `serve.sh`: local https server

@@ -39,6 +39,15 @@
   #deskHelp { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); z-index: 3; background: rgba(30,20,60,0.8); padding: 8px 14px; border-radius: 12px; font-size: 14px; display: none; text-align: center; }
   #crosshair { position: fixed; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; border: 2px solid rgba(255,255,255,0.7); border-radius: 50%; z-index: 3; display: none; pointer-events: none; }
   #crosshair.active { border-color: #ffe066; background: rgba(255,224,102,0.5); }
+  .avatarBox { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start; }
+  #avPreview { width: 200px; height: 280px; border-radius: 16px; background: radial-gradient(circle at 50% 30%, #4a3480, #1a1030); flex: none; }
+  .avOpts { flex: 1; min-width: 240px; }
+  .avOpts h3 { margin: 8px 0 6px; font-size: 15px; color: #ffe9a8; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { padding: 8px 12px; border-radius: 12px; border: 2px solid #6a54b8; background: #2b1a4a; color: #fff; font-size: 15px; cursor: pointer; }
+  .chip.on { border-color: #ffd54a; background: #6a54b8; }
+  .sw { width: 34px; height: 34px; border-radius: 50%; border: 3px solid rgba(255,255,255,0.3); cursor: pointer; }
+  .sw.on { border-color: #ffd54a; box-shadow: 0 0 0 2px #ffd54a; }
 </style>
 </head>
 <body>
@@ -48,7 +57,7 @@
   <section id="quick" style="display:none;text-align:center">
     <h2 id="quickHi" style="font-size:28px"></h2>
     <button class="go" id="quickVr" disabled>Checking for VR…</button>
-    <p class="note"><small class="link" id="quickEdit">change settings or add homework</small></p>
+    <p class="note"><small class="link" id="quickEdit">change hero, settings or homework</small></p>
   </section>
   <div id="settingsBody">
 
@@ -60,6 +69,21 @@
       <button class="grade" data-grade="2">2nd Grade</button>
       <button class="grade" data-grade="4">4th Grade</button>
     </div>
+  </section>
+
+  <section>
+    <h2>Choose your hero</h2>
+    <div class="avatarBox">
+      <canvas id="avPreview" width="400" height="560"></canvas>
+      <div class="avOpts">
+        <h3>Hero</h3><div class="chips" id="avStyle"></div>
+        <h3>Outfit color</h3><div class="chips" id="avOutfit"></div>
+        <h3>Hair</h3><div class="chips" id="avHairStyle"></div>
+        <div class="chips" id="avHair" style="margin-top:6px"></div>
+        <h3>Skin</h3><div class="chips" id="avSkin"></div>
+      </div>
+    </div>
+    <p class="note">She'll see her hero in the magic mirrors inside the tower.</p>
   </section>
 
   <section>
@@ -87,6 +111,9 @@
         <option value="auto">Try automatic Guardian fit (experimental)</option>
       </select>
     </label>
+    <label>Music
+      <select id="music"><option value="0">Off</option><option value="0.35" selected>Soft</option><option value="0.6">Medium</option><option value="1">Loud</option></select>
+    </label>
     <p class="note">Each castle floor is one room this size, centred where she is standing when she presses Enter. The wall she is facing becomes the Magic Lock wall. Pick a size a little smaller than the clear space inside the Guardian.</p>
   </section>
 
@@ -106,10 +133,23 @@
 <script type="module">
 import { Game } from './js/game.js';
 import { MODULES, parseHomework } from './js/problems.js';
+import { AVATAR_OPTIONS, DEFAULT_AVATAR, avatarPreview } from './js/avatar.js';
 
 const $ = (id) => document.getElementById(id);
 const store = { get: (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } }, set: (k, v) => localStorage.setItem(k, JSON.stringify(v)) };
 let grade = null;
+let avatar = { ...DEFAULT_AVATAR };
+const preview = avatarPreview($('avPreview'));
+function renderAvatarPicker() {
+  const chipRow = (id, list, key) => { $(id).innerHTML = ''; for (const [v, label] of list) { const b = document.createElement('button'); b.className = 'chip' + (avatar[key] === v ? ' on' : ''); b.textContent = label; b.onclick = () => { avatar[key] = v; renderAvatarPicker(); }; $(id).appendChild(b); } };
+  const swatchRow = (id, list, key) => { $(id).innerHTML = ''; for (const c of list) { const b = document.createElement('button'); b.className = 'sw' + (avatar[key] === c ? ' on' : ''); b.style.background = c; b.title = c; b.onclick = () => { avatar[key] = c; renderAvatarPicker(); }; $(id).appendChild(b); } };
+  chipRow('avStyle', AVATAR_OPTIONS.style, 'style');
+  swatchRow('avOutfit', AVATAR_OPTIONS.outfit, 'outfit');
+  chipRow('avHairStyle', AVATAR_OPTIONS.hairStyle, 'hairStyle');
+  swatchRow('avHair', AVATAR_OPTIONS.hair, 'hair');
+  swatchRow('avSkin', AVATAR_OPTIONS.skin, 'skin');
+  preview.set(avatar);
+}
 
 function profileKey(name) { return `mathcastle.settings.${(name || 'explorer').toLowerCase()}`; }
 
@@ -139,6 +179,7 @@ function loadProfile(name) {
   const s = store.get(profileKey(name), null);
   if (!s) return;
   $('name').value = s.name; $('homework').value = s.homework || ''; $('hwOnly').checked = !!s.homeworkOnly;
+  avatar = { ...DEFAULT_AVATAR, ...(s.avatar || {}) }; renderAvatarPicker(); $('music').value = String(s.music ?? 0.35);
   $('perDoor').value = String(s.perDoor || 2); $('roomSize').value = s.roomSize || '2.5';
   setGrade(s.grade, s.moduleIds);
 }
@@ -158,7 +199,7 @@ function collect() {
   if (!grade) { alert('Pick 2nd grade or 4th grade first.'); return null; }
   const moduleIds = [...document.querySelectorAll('#mods input:checked')].map((i) => i.value);
   if (!moduleIds.length && !$('hwOnly').checked) { alert('Pick at least one module.'); return null; }
-  const settings = { name, grade, moduleIds, perDoor: Number($('perDoor').value), roomSize: $('roomSize').value, homework: $('homework').value, homeworkOnly: $('hwOnly').checked };
+  const settings = { name, grade, moduleIds, perDoor: Number($('perDoor').value), roomSize: $('roomSize').value, avatar: { ...avatar }, music: Number($('music').value), homework: $('homework').value, homeworkOnly: $('hwOnly').checked };
   store.set(profileKey(name), settings);
   const names = store.get('mathcastle.profiles', []);
   if (!names.some((n) => n.toLowerCase() === name.toLowerCase())) store.set('mathcastle.profiles', [...names, name]);
@@ -186,6 +227,7 @@ $('vrBtn').onclick = () => start(true);
 
 renderProfiles();
 renderMods();
+renderAvatarPicker();
 // Bookmark links like ?player=Ava&grade=2 jump straight to that explorer.
 const params = new URLSearchParams(location.search);
 const qp = params.get('player'), qg = Number(params.get('grade'));
