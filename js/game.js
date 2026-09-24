@@ -434,7 +434,12 @@ export class Game {
       // Use the exact bounded space whose geometry was fitted.
       if (this.xrBoundsSpace) this.renderer.xr.setReferenceSpace(this.xrBoundsSpace);
       const reference = this.renderer.xr.getReferenceSpace();
-      const reset = () => { this.xrReset = true; session.end().catch(() => {}); };
+      // Recentering (long-press of the Meta button) resets the space. In measured-size mode just
+      // re-centre the room on where she now stands and keep her progress; Guardian-fit mode restarts.
+      const reset = () => {
+        if (type === 'local-floor') { this.xrCalibrating = true; return; }
+        this.xrReset = true; session.end().catch(() => {});
+      };
       reference.addEventListener('reset', reset);
       session.addEventListener('end', () => {
         reference.removeEventListener('reset', reset);
