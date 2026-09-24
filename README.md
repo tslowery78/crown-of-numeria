@@ -41,6 +41,18 @@ After that, she opens the Browser, taps her bookmark, and taps **Enter the Castl
 - **Choose your hero** shows a live preview. There are six hero classes (Adventurer, Princess, Knight, Wizard, Fairy, Explorer) and an outfit colour. A family member keeps her own face, hair, glasses and beard in every costume.
 - **Grown-up settings** (collapsed) holds the name, the maths grade, hair and skin for custom players, family names, modules, homework, problems per lock, play area and music. Grade is separate from the look: choosing a family member's look never changes the grade, and grown-ups must pick one.
 
+## Continue where you left off
+
+The climb is saved on the headset after every finished problem, opened chest and floor. If the headset comes off or the page reloads, her bookmark offers **Continue the climb**, with her floor, open chests, gems and score. Homework problems she already finished aren't asked again, as long as the homework text hasn't changed. **Start a new tower** begins fresh. Finishing the tower clears the save.
+
+## Homework report (for grown-ups)
+
+Open **Grown-up settings → Homework report → Show report** for the last four climbs. For each problem it shows every answer she tried (wrong ones struck through), whether she got it on the first try, how long it took, and a thumbnail of her Magic Scroll working when she wrote any. **Practise the missed ones next time** copies anything she didn't get first time into the homework list. Reports stay on the headset only.
+
+## Read-aloud
+
+"Read each problem aloud automatically" (Grown-up settings) speaks each new problem as it appears. It is on by default for 2nd grade. The **Read** button on every panel still works either way.
+
 ## The Magic Scroll (scratch paper)
 
 A parchment scroll hangs to the left of every Magic Lock so she can write out her steps, for example lining up 245 + 367 to add in columns. The top shows the current problem. She can write three ways:

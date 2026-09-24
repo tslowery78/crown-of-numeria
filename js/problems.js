@@ -263,11 +263,14 @@ export function parseHomework(src, grade) {
 
 // ------------------------------------------------------ problem source
 export class ProblemSource {
-  constructor({ grade, moduleIds, homework = [], homeworkOnly = false }) {
+  // homeworkDone: indices of homework problems already finished (when continuing a climb)
+  constructor({ grade, moduleIds, homework = [], homeworkOnly = false, homeworkDone = [] }) {
     this.gens = MODULES[grade].filter((m) => moduleIds.includes(m.id)).flatMap((m) => m.gens);
     if (!this.gens.length) this.gens = MODULES[grade].flatMap((m) => m.gens);
-    this.homework = homework.slice();
     if (homeworkOnly && !homework.length) throw new Error('Add at least one valid homework problem before choosing homework only.');
+    const tagged = homework.map((p, i) => ({ ...p, hwi: i }));
+    const left = tagged.filter((p) => !homeworkDone.includes(p.hwi));
+    this.homework = left.length || !homeworkOnly ? left : tagged; // homework-only repeats once all are done
     this.homeworkOnly = homeworkOnly;
     this.hwIndex = 0;
     this.seen = new Set();

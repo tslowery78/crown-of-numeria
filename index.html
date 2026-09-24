@@ -38,6 +38,11 @@
   #hud { position: fixed; top: 12px; left: 12px; z-index: 3; background: rgba(30,20,60,0.8); padding: 8px 14px; border-radius: 12px; font-weight: bold; display: none; }
   #deskHelp { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); z-index: 3; background: rgba(30,20,60,0.8); padding: 8px 14px; border-radius: 12px; font-size: 14px; display: none; text-align: center; }
   #crosshair { position: fixed; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; border: 2px solid rgba(255,255,255,0.7); border-radius: 50%; z-index: 3; display: none; pointer-events: none; }
+  #report table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 14px; }
+  #report td, #report th { border-bottom: 1px solid rgba(255,255,255,0.12); padding: 6px 4px; vertical-align: top; text-align: left; }
+  #report img { width: 150px; border-radius: 6px; background: #f7ecd0; }
+  #report .bad { color: #ffb3b3; text-decoration: line-through; } #report .ok { color: #9dffbe; }
+  #report h3 { color: #ffe9a8; margin: 14px 0 2px; font-size: 16px; }
   #crosshair.active { border-color: #ffe066; background: rgba(255,224,102,0.5); }
   .avatarBox { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start; }
   #avPreview { width: 200px; height: 280px; border-radius: 16px; background: radial-gradient(circle at 50% 30%, #4a3480, #1a1030); flex: none; }
@@ -95,6 +100,11 @@
     <p class="note">You'll see your hero in the magic mirrors inside the tower.</p>
   </section>
 
+  <section id="resumeBox" style="display:none">
+    <h2 id="resumeHi"></h2>
+    <div class="chips"><button class="chip on" id="resumeYes">Continue the climb</button><button class="chip" id="resumeNo">Start a new tower</button></div>
+  </section>
+
   <div class="playRow">
     <button class="go" id="vrBtn" disabled>Checking for VR…</button>
     <button class="go" id="deskBtn">Play on this screen</button>
@@ -125,6 +135,13 @@
   </section>
 
   <section>
+    <h2>Homework report</h2>
+    <p class="note">Every problem from the last four climbs: her answers, first-try results, time taken, and what she wrote on the Magic Scroll.</p>
+    <div class="chips"><button class="chip" id="showReport">Show report</button><button class="chip" id="missedToHw" style="display:none">Practise the missed ones next time</button></div>
+    <div id="report"></div>
+  </section>
+
+  <section>
     <h2>Which Bluebonnet math modules?</h2>
     <p class="note">Pick the module(s) you are working on in class. <small class="link" id="allMods">all</small> · <small class="link" id="noMods">none</small></p>
     <div class="mods" id="mods"></div>
@@ -149,6 +166,7 @@
         <option value="auto">Try automatic Guardian fit (experimental)</option>
       </select>
     </label>
+    <label><input type="checkbox" id="autoRead"> Read each problem aloud automatically (great for younger readers)</label>
     <label>Music
       <select id="music"><option value="0">Off</option><option value="0.35" selected>Soft</option><option value="0.6">Medium</option><option value="1">Loud</option></select>
     </label>
@@ -209,8 +227,8 @@ function chooseFamily(id) {
   if (store.get(profileKey(name), null)) return loadProfile(name);
   $('name').value = name; $('homework').value = ''; $('hwOnly').checked = false;
   avatar = familyDefaults(id);
-  setGrade(f.grade, null);
-  renderAvatarPicker();
+  setGrade(f.grade, null); $('autoRead').checked = f.grade === 2;
+  renderAvatarPicker(); renderResume(); $('report').innerHTML = '';
   if (!f.grade) { $('parent').open = true; $('hwStatus').className = 'note'; $('hwStatus').textContent = `Pick a maths grade for ${name} above.`; }
 }
 
@@ -247,8 +265,10 @@ function loadProfile(name) {
   avatar = { ...DEFAULT_AVATAR, ...(s.avatar || {}) };
   if (!s.avatar?.identity) avatar.identity = identityForName(s.name, familyNames()) || 'custom';
   renderAvatarPicker(); $('music').value = String(s.music ?? 0.35);
+  $('autoRead').checked = s.autoRead ?? s.grade === 2;
   $('perDoor').value = String(s.perDoor || 2); $('roomSize').value = s.roomSize || '2.5';
   setGrade(s.grade, s.moduleIds);
+  renderResume(); $('report').innerHTML = ''; $('missedToHw').style.display = 'none';
 }
 function renderProfiles() {
   const names = store.get('mathcastle.profiles', []);
@@ -269,13 +289,65 @@ function collect() {
   const { problems: hw, errors } = parseHomework($('homework').value, grade);
   if (errors.length) { alert(`Please fix the homework before starting:\n${errors.join('\n')}`); return null; }
   if ($('hwOnly').checked && !hw.length) { alert('Add at least one valid homework problem for this grade, or turn off homework only.'); return null; }
-  const settings = { name, grade, moduleIds, perDoor: Number($('perDoor').value), roomSize: $('roomSize').value, avatar: { ...avatar }, music: Number($('music').value), homework: $('homework').value, homeworkOnly: $('hwOnly').checked };
+  const settings = { name, grade, moduleIds, perDoor: Number($('perDoor').value), roomSize: $('roomSize').value, avatar: { ...avatar }, music: Number($('music').value), autoRead: $('autoRead').checked, homework: $('homework').value, homeworkOnly: $('hwOnly').checked };
   store.set(profileKey(name), settings);
   const names = store.get('mathcastle.profiles', []);
   if (!names.some((n) => n.toLowerCase() === name.toLowerCase())) store.set('mathcastle.profiles', [...names, name]);
   store.set('mathcastle.last', name);
-  return { ...settings, homework: hw };
+  const hwKey = hashText(settings.homework);
+  const cp = resumeWanted ? checkpointFor(name) : null;
+  // continue the climb; finished homework is skipped only if the homework text is unchanged
+  const resume = cp ? { ...cp, hwDone: cp.hwKey === hwKey ? cp.hwDone : [], session: cp.hwKey === hwKey ? cp.session : null } : null;
+  if (!resumeWanted) localStorage.removeItem(`mathcastle.checkpoint.${name.toLowerCase()}`);
+  return { ...settings, homework: hw, hwKey, resume };
 }
+function hashText(t) { let h = 0; for (const ch of String(t || '')) h = (h * 31 + ch.codePointAt(0)) | 0; return String(h); }
+function checkpointFor(name) { const cp = store.get(`mathcastle.checkpoint.${String(name).toLowerCase()}`, null); return cp && cp.v === 1 && cp.level >= 0 ? cp : null; }
+let resumeWanted = true;
+function renderResume() {
+  const name = $('name').value.trim(), cp = name && checkpointFor(name);
+  const show = !!cp && (cp.level > 0 || (cp.stats?.correct || 0) > 0);
+  $('resumeBox').style.display = show ? '' : 'none';
+  if (!show) return;
+  resumeWanted = true;
+  $('resumeHi').textContent = `${name} was on floor ${Math.min(cp.level, 5) + 1} of 6 with ${cp.treasures.length} gem${cp.treasures.length === 1 ? '' : 's'}.`;
+  $('resumeYes').classList.add('on'); $('resumeNo').classList.remove('on');
+}
+$('resumeYes').onclick = () => { resumeWanted = true; $('resumeYes').classList.add('on'); $('resumeNo').classList.remove('on'); };
+$('resumeNo').onclick = () => { resumeWanted = false; $('resumeNo').classList.add('on'); $('resumeYes').classList.remove('on'); };
+// ---- grown-up report
+function esc(t) { const d = document.createElement('div'); d.textContent = String(t); return d.innerHTML; }
+let missedLines = [];
+function renderReport() {
+  const name = $('name').value.trim() || 'Explorer';
+  const sessions = store.get(`mathcastle.sessions.${name.toLowerCase()}`, []);
+  missedLines = [];
+  if (!sessions.length) { $('report').innerHTML = `<p class="note">No climbs recorded for ${esc(name)} yet.</p>`; $('missedToHw').style.display = 'none'; return; }
+  let html = '';
+  for (const se of sessions) {
+    const probs = se.problems || [], right = probs.filter((q) => q.ok).length, first = probs.filter((q) => q.first).length, mins = Math.max(1, Math.round(((se.end || se.start) - se.start) / 60000));
+    html += `<h3>${esc(new Date(se.start).toLocaleString())} · ${se.done ? 'finished the tower' : `reached floor ${se.floor}`} · ${mins} min</h3>`;
+    html += `<p class="note">${probs.length} problems · ${right} solved · ${first} right on the first try</p><table><tr><th>Problem</th><th>Her answers</th><th>Time</th><th>Work</th></tr>`;
+    for (const q of probs) {
+      const tries = q.tries.map((v, k) => `<span class="${q.ok && k === q.tries.length - 1 ? 'ok' : 'bad'}">${esc(v)}</span>`).join(' → ');
+      html += `<tr><td>${q.hw ? '📘 ' : ''}${esc(q.t)}<br><small>answer: ${esc(q.a)}</small></td><td>${tries || '—'} ${q.ok ? (q.first ? '✅' : '✔️') : '❌'}</td><td>${q.secs}s</td><td>${q.work ? `<img alt="her scroll work" src="${q.work}">` : ''}</td></tr>`;
+      if (!q.first) missedLines.push(`${q.t.replace(/\n/g, ' ')} | ${q.a}${q.choices ? ` | ${q.choices.join('; ')}` : ''}`);
+    }
+    html += '</table>';
+  }
+  $('report').innerHTML = html;
+  missedLines = [...new Set(missedLines)];
+  $('missedToHw').style.display = missedLines.length ? '' : 'none';
+  $('missedToHw').textContent = `Practise the ${missedLines.length} missed one${missedLines.length === 1 ? '' : 's'} next time`;
+}
+$('showReport').onclick = renderReport;
+$('missedToHw').onclick = () => {
+  const cur = $('homework').value.trim();
+  const add = missedLines.filter((l) => !cur.includes(l));
+  if (!add.length) { $('missedToHw').textContent = 'They are already in the homework list'; return; }
+  $('homework').value = (cur ? cur + '\n' : '') + `[grade ${grade}]\n` + add.join('\n');
+  checkHomework(); $('missedToHw').textContent = `Added ${add.length} to homework: press Play to practise`;
+};
 function start(vr) {
   const opts = collect();
   if (!opts) return;
@@ -290,13 +362,14 @@ function start(vr) {
   else { game.startDesktop(); game.onExitVR(); }
 }
 
-document.querySelectorAll('.grade').forEach((b) => (b.onclick = () => setGrade(Number(b.dataset.grade))));
+document.querySelectorAll('.grade').forEach((b) => (b.onclick = () => { setGrade(Number(b.dataset.grade)); if (!store.get(profileKey($('name').value.trim()), null)) $('autoRead').checked = grade === 2; }));
 $('allMods').onclick = () => document.querySelectorAll('#mods input').forEach((i) => (i.checked = true));
 $('noMods').onclick = () => document.querySelectorAll('#mods input').forEach((i) => (i.checked = false));
 $('homework').addEventListener('input', checkHomework);
 $('deskBtn').onclick = () => start(false);
 $('vrBtn').onclick = () => start(true);
 $('someoneElse').onclick = () => { $('name').value = ''; avatar = { ...DEFAULT_AVATAR }; renderAvatarPicker(); $('parent').open = true; $('name').focus(); };
+$('name').addEventListener('change', () => renderResume());
 $('name').addEventListener('input', () => { if (FAMILY[avatar.identity] && $('name').value.trim().toLowerCase() !== famName(avatar.identity).toLowerCase()) { avatar = { ...avatar, identity: 'custom' }; renderAvatarPicker(); } });
 function renderFamilyNames() {
   const names = familyNames();

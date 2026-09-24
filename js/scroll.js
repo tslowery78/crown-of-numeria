@@ -61,8 +61,14 @@ export class MagicScroll {
     c.fillText(t === this.problemText ? t : `${t}…`, 22, 58);
     c.strokeStyle = 'rgba(107,63,31,0.35)'; c.beginPath(); c.moveTo(16, HEAD + 10); c.lineTo(CW - 16, HEAD + 10); c.stroke();
     this.drawFooter();
-    this.strokes.clear();
+    this.strokes.clear(); this.used = false;
     this.dirty = true;
+  }
+  // Small JPEG of her work for the grown-up report.
+  snapshot() {
+    const c = document.createElement('canvas'); c.width = 256; c.height = Math.round(256 * CH / CW);
+    c.getContext('2d').drawImage(this.canvas, 0, 0, c.width, c.height);
+    return c.toDataURL('image/jpeg', 0.6);
   }
   drawFooter() {
     const c = this.ctx, y = CH - FOOT;
@@ -96,6 +102,7 @@ export class MagicScroll {
     if (py < HEAD + 14) { this.strokes.delete(key); return; }
     const last = this.strokes.get(key), c = this.ctx;
     c.strokeStyle = INKS[this.ink]; c.fillStyle = INKS[this.ink]; c.lineWidth = 6; c.lineCap = 'round'; c.lineJoin = 'round';
+    this.used = true;
     if (!last) { c.beginPath(); c.arc(px, py, 3, 0, 7); c.fill(); this.strokes.set(key, { x: px, y: py }); this.dirty = true; return; }
     if (Math.hypot(px - last.x, py - last.y) < 1.5) return; // ignore hand-tracking jitter
     c.beginPath(); c.moveTo(last.x, last.y); c.lineTo(px, py); c.stroke();

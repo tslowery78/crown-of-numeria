@@ -209,7 +209,7 @@ class Panel {
   activate() { if (!this.problem && this.state === 'solving') this.newProblem(); }
   newProblem() {
     this.problem = this.game.source.next();
-    this.input = ''; this.wrong = 0; this.msg = ''; this.firstTry = true;
+    this.input = ''; this.wrong = 0; this.msg = ''; this.firstTry = true; this.tries = []; this.shownAt = performance.now();
     this.onProblem?.(this.problem);
     this.draw();
   }
@@ -322,9 +322,11 @@ class Panel {
     const g = this.game;
     if (!val) { this.msg = 'Type your answer, then press OK.'; this.msgColor = '#ffd86b'; this.draw(); return; }
     g.stats.attempts++;
+    this.tries?.push(val);
     if (isCorrect(this.problem, val)) {
       g.sfx.correct(); g.stats.correct++; if (this.firstTry) g.stats.firstTry++;
       this.solved++;
+      g.logProblem?.(this, true);
       this.msg = ['Correct! Great job!', 'Yes! You got it!', 'Brilliant!', 'Awesome math!'][Math.floor(Math.random() * 4)];
       this.msgColor = '#4dff9a';
       g.burst(this.mesh.getWorldPosition(new THREE.Vector3()), 25);
@@ -339,6 +341,7 @@ class Panel {
       else if (this.wrong === 2) { this.msg = `Hint: ${this.problem.hint}`; this.msgColor = '#ffd86b'; }
       else {
         this.msg = `The answer is ${this.problem.answer}. Let's try a new one!`; this.msgColor = '#ff9a9a';
+        g.logProblem?.(this, false);
         // hands-on problems replay the operation on the gem tray before moving on
         const tray = this.game.tray, demo = this.problem.manip && tray?.panel === this ? tray.demo(this.problem.answer) : 0;
         this.busyUntil = performance.now() + Math.max(3500, demo * 1000 + 1500); this.after = () => this.newProblem();
@@ -434,7 +437,7 @@ export class Game {
       this.fitInfo = { type, w, d };
       this.renderer.xr.setReferenceSpaceType(type);
       this.buildWorld(w, d);
-      this.rig.rotation.set(0, 0, 0); this.rig.position.set(-cx, 0, -cz);
+      this.rig.rotation.set(0, 0, 0); this.rig.position.set(-cx, fy(this.level), -cz);
       this.xrCalibrating = type === 'local-floor';
       this.camera.position.set(0, 0, 0); this.camera.rotation.set(0, 0, 0);
       await this.renderer.xr.setSession(session);
@@ -536,7 +539,9 @@ export class Game {
     this.W = W; this.D = D;
     if (this.world) { this.scene.remove(this.world); this.world.traverse((o) => { o.geometry?.dispose(); }); }
     this.world = new THREE.Group(); this.scene.add(this.world);
-    this.source = new ProblemSource(this.opts);
+    this.source = new ProblemSource({ ...this.opts, homeworkDone: this.opts.resume?.hwDone || [] });
+    this.session = this.opts.resume?.session ? { ...this.opts.resume.session, problems: this.loadSessionProblems(this.opts.resume.session.id) } : { id: Date.now(), start: Date.now(), problems: [], hwDone: [] };
+    this.session.hwDone ??= [];
     this.stats = { attempts: 0, correct: 0, firstTry: 0, missed: [], treasures: [] };
     this.level = 0; this.lift = { state: 'locked', dwell: 0, t: 0 };
     this.panels = []; this.chests = []; this.locks = []; this.hatches = []; this.blockers = []; this.floaters = [];
@@ -656,7 +661,6 @@ export class Game {
     for (let i = 0; i < TOP; i++) this.makeLock(i);
     for (let i = 0; i < TOP; i++) this.makeChest(i);
     this.makeFinale();
-    this.locks[0].panel.activate();
     this.makeLift();
     this.makeWelcome();
     this.makeMirror(0, new THREE.Vector3(hw - 0.02, 0, 0), -Math.PI / 2);
@@ -672,6 +676,8 @@ export class Game {
     // props & creatures
     this.props = new Props(this);
     this.props.build({ W, D, fy, FH, CEIL, FLOORS, TOP });
+    if (this.opts.resume) this.applyResume(this.opts.resume);
+    (this.level >= TOP ? this.finalChest.panel : this.locks[this.level].panel).activate();
     this.updateHud();
   }
 
@@ -964,7 +970,7 @@ export class Game {
     panel.floor = i; panel.wallMounted = true;
     const orig = panel.update.bind(panel);
     panel.update = () => { orig(); gems.forEach((g, k) => { const on = k < panel.solved; g.material.color.setHex(on ? 0x4dff9a : 0x555566); g.material.emissive.setHex(on ? 0x1f8a4a : 0); }); };
-    panel.onProblem = (p) => { this.tray.bind(panel, p); this.scroll.setProblem(p.text); };
+    panel.onProblem = (p) => { this.tray.bind(panel, p); this.scroll.setProblem(p.text); if (this.level === i) this.readAloud(p, 1.2); };
     this.world.add(panel.mesh); this.panels.push(panel);
     lock.panel = panel; this.locks.push(lock);
   }
@@ -1046,13 +1052,20 @@ export class Game {
         (this.level === TOP ? this.finalChest.panel : this.locks[this.level].panel).activate();
         this.lift = { state: this.level >= TOP ? 'done' : 'locked', dwell: 0, t: 0 };
         this.rig.position.y = fy(this.level);
-        this.setGuide(null); this.placeLights(); this.updateHud();
+        this.setGuide(null); this.placeLights(); this.updateHud(); this.saveCheckpoint(); this.saveSession();
         this.audio.cueArrive(FLOOR_MOODS[this.level]); this.audio.setMood(FLOOR_MOODS[this.level]);
         this.burst(new THREE.Vector3(0, fy(this.level) + 0.3, 0), 50);
         if (this.level === TOP) this.showBanner('The Tower Top!');
         else this.showBanner(`Floor ${this.level + 1}: ${FLOORS[this.level].name}`);
       }
     }
+  }
+
+  // Optional automatic read-aloud (default on for 2nd grade), after arrival cues settle.
+  readAloud(p, delay = 0.3) {
+    if (!p || !this.opts.autoRead) return;
+    clearTimeout(this.readTimer);
+    this.readTimer = setTimeout(() => speak(p.text), delay * 1000);
   }
 
   showBanner(text) {
@@ -1140,6 +1153,7 @@ export class Game {
     this.world.add(panel.mesh); this.panels.push(panel);
     chest.panel = panel;
     this.audio.click();
+    this.readAloud(panel.problem);
   }
 
   openChest(chest) {
@@ -1152,6 +1166,7 @@ export class Game {
     const prize = chest.prize;
     prize.position.copy(wp).setY(wp.y + 0.4); prize.visible = true;
     this.stats.treasures.push(chest.tName);
+    if (!chest.big) this.saveCheckpoint();
     if (chest.big) return this.victory(chest);
     this.animate(1.4, (t) => { prize.position.y = wp.y + 0.4 + t * 0.9; prize.rotation.y = t * 8; }, () => {
       const from = prize.position.clone();
@@ -1173,7 +1188,7 @@ export class Game {
     panel.floor = TOP; panel.wallMounted = true;
     this.world.add(panel.mesh); this.panels.push(panel);
     chest.panel = panel;
-    panel.onProblem = (p) => this.scroll.setProblem(p.text);
+    panel.onProblem = (p) => { this.scroll.setProblem(p.text); this.readAloud(p, 1.2); };
     this.finalChest = chest;
   }
 
@@ -1201,7 +1216,7 @@ export class Game {
     this.props.perchDragon(new THREE.Vector3(this.W / 2 + 1.2, y0 + 1.1, -this.D / 2 - 1.2));
     for (let k = 0; k < 10; k++) setTimeout(() => { const a = Math.random() * Math.PI * 2, r = 12 + Math.random() * 12, p = new THREE.Vector3(Math.cos(a) * r, y0 + 8 + Math.random() * 8, Math.sin(a) * r); this.burst(p, 120, 0.25, 9); this.audio.boom(p); }, 600 + k * 450);
     const s = this.stats;
-    this.saveProgress();
+    this.saveProgress(); this.saveSession();
     const vp = new Panel(this, { title: 'Tower Conquered!', count: 0, defer: true });
     vp.state = 'victory';
     vp.draw = () => {
@@ -1237,7 +1252,68 @@ export class Game {
     this.onVictory?.(s);
   }
 
+  // ---------------------------------------------------------- checkpoint & report
+  get playerKey() { return (this.opts.name || 'Explorer').toLowerCase(); }
+  // Everything needed to continue this climb after a reload or taking the headset off.
+  saveCheckpoint() {
+    const cp = {
+      v: 1, at: Date.now(), level: this.level, hwKey: this.opts.hwKey || '',
+      chests: this.chests.filter((c) => c.opened && !c.big).map((c) => c.i),
+      treasures: this.stats.treasures.slice(),
+      stats: { attempts: this.stats.attempts, correct: this.stats.correct, firstTry: this.stats.firstTry, missed: this.stats.missed.slice(-40) },
+      hwDone: this.session.hwDone.slice(), session: { id: this.session.id, start: this.session.start, hwDone: this.session.hwDone.slice() },
+    };
+    try { localStorage.setItem(`mathcastle.checkpoint.${this.playerKey}`, JSON.stringify(cp)); } catch { /* storage full: keep playing */ }
+  }
+  applyResume(cp) {
+    const L = Math.max(0, Math.min(cp.level | 0, TOP));
+    for (let i = 0; i < L; i++) {
+      const lock = this.locks[i];
+      lock.open = true; lock.pad.visible = false; lock.panel.state = 'done'; lock.panel.mesh.visible = false;
+      lock.gems.forEach((g) => g.material.color.setHex(0x4dff9a));
+      this.hatches[i].visible = false;
+    }
+    for (const i of cp.chests || []) {
+      const ch = this.chests.find((c) => c.i === i && !c.big);
+      if (ch) { ch.opened = true; ch.q.visible = false; ch.lidPivot.rotation.x = -1.9; }
+    }
+    this.level = L; this.rig.position.y = fy(L);
+    this.platform.position.y = fy(L) - 0.06 + 0.006;
+    this.lift = { state: L >= TOP ? 'done' : 'locked', dwell: 0, t: 0 };
+    Object.assign(this.stats, cp.stats || {}); this.stats.treasures = (cp.treasures || []).slice();
+    this.placeLights(); this.updateHud();
+    this.resumed = true; this.welcomeBack = true;
+  }
+  // Session report: each finished problem with her tries, time and scroll work.
+  logProblem(panel, ok) {
+    const p = panel.problem; if (!p) return;
+    const onScroll = panel.wallMounted && this.scroll?.problemText === String(p.text).replace(/\n/g, ' ');
+    this.session.problems.push({
+      t: p.text, a: p.answer, choices: p.choices || null, tries: (panel.tries || []).slice(), ok, first: ok && panel.firstTry,
+      secs: Math.round((performance.now() - (panel.shownAt || performance.now())) / 1000), hw: !!p.homework, floor: this.level + 1,
+      work: onScroll && this.scroll.used ? this.scroll.snapshot() : null,
+    });
+    if (p.hwi !== undefined && !this.session.hwDone.includes(p.hwi)) this.session.hwDone.push(p.hwi);
+    this.saveSession(); this.saveCheckpoint();
+  }
+  loadSessionProblems(id) {
+    try { return (JSON.parse(localStorage.getItem(`mathcastle.sessions.${this.playerKey}`)) || []).find((s) => s.id === id)?.problems || []; } catch { return []; }
+  }
+  saveSession() {
+    const key = `mathcastle.sessions.${this.playerKey}`;
+    let all; try { all = JSON.parse(localStorage.getItem(key)) || []; } catch { all = []; }
+    const me = { id: this.session.id, start: this.session.start, end: Date.now(), grade: this.opts.grade, floor: this.level + 1, done: this.level >= TOP && !!this.progress, problems: this.session.problems };
+    all = [me, ...all.filter((x) => x.id !== me.id)].slice(0, 4);
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try { localStorage.setItem(key, JSON.stringify(all)); return; } catch {
+        // over the storage quota: drop the oldest session, then pictures of old work
+        if (all.length > 1) all.pop(); else all[0].problems.forEach((q, k) => { if (k < all[0].problems.length - 5) q.work = null; });
+      }
+    }
+  }
+
   saveProgress() {
+    try { localStorage.removeItem(`mathcastle.checkpoint.${this.playerKey}`); } catch { /* ignore */ }
     const key = `mathcastle.progress.${(this.opts.name || 'Explorer').toLowerCase()}`;
     const p = JSON.parse(localStorage.getItem(key) || '{"castles":0,"gems":0,"solved":0}');
     p.castles++; p.gems += this.stats.treasures.length; p.solved += this.stats.correct;
@@ -1580,6 +1656,7 @@ export class Game {
       }
     }
     const head = this.headPos(), headQ = this.camera.getWorldQuaternion(new THREE.Quaternion());
+    if (this.welcomeBack && t > 1) { this.welcomeBack = false; this.showBanner(this.level >= TOP ? 'Welcome back to the Tower Top!' : `Welcome back! Floor ${this.level + 1}`); }
     const eye = head.y - this.rig.position.y;
     this.panelH += (clamp(eye - 0.3, 0.75, 1.3) - this.panelH) * Math.min(1, dt * 2);
     for (const p of this.panels) { if (p.wallMounted) p.mesh.position.y = fy(p.floor) + this.panelH + (p.lift || 0); p.update(); }
