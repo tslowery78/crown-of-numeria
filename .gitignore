@@ -1,4 +1,5 @@
-.cert/
 .DS_Store
+.cert/
 TASK.md
+design/
 node_modules/

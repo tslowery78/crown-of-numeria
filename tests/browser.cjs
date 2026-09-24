@@ -6,6 +6,12 @@ const url=process.argv[2]||'http://127.0.0.1:8765/';
  const browser=await chromium.launch({channel:'chrome',headless:true});
  try {
   const page=await browser.newPage({viewport:{width:1280,height:900}}), errors=[];
+  // Optional: serve the project straight from disk (for machines where a local HTTP server
+  // can't be reached). Usage: node tests/browser.cjs http://castle.test/ --files
+  if(process.argv.includes('--files')){
+   const path=require('node:path'),root=path.join(__dirname,'..'),types={'.html':'text/html','.js':'text/javascript','.json':'application/json','.svg':'image/svg+xml','.txt':'text/plain','.jpg':'image/jpeg','.png':'image/png'};
+   await page.route(new URL(url).origin+'/**',route=>{const f=path.join(root,decodeURIComponent(new URL(route.request().url()).pathname));if(!f.startsWith(root)||!fs.existsSync(f)||fs.statSync(f).isDirectory()){const idx=path.join(f,'index.html');if(fs.existsSync(idx))return route.fulfill({status:200,contentType:'text/html',body:fs.readFileSync(idx)});return route.fulfill({status:404,body:''});}route.fulfill({status:200,contentType:types[path.extname(f)]||'application/octet-stream',body:fs.readFileSync(f)});});
+  }
   page.on('pageerror',e=>errors.push(e.message));
   await page.goto(url+'?player=Regression&grade=2');await page.locator('#quickEdit').click();
   for (const style of ['Princess','Knight','Fairy','Explorer','Wizard']) await page.getByRole('button',{name:style,exact:true}).click();
@@ -62,7 +68,8 @@ const url=process.argv[2]||'http://127.0.0.1:8765/';
   assert.deepEqual(game.bowling,[true,true]);assert.deepEqual(game.basket,[1,0,1]);
   for(const key of ['bounce','outside','respawn','helmet','cat','bubble','crystal','owl','grab','throw'])assert.equal(game[key],true,key);
   assert.ok(game.planeDistance>2);assert.equal(game.wind,'HRTF');
-  await page.waitForTimeout(5500);
+  // the crown lands after its fly-up animation; wait for it rather than a fixed time (software GL is slow)
+  await page.waitForFunction(()=>__castle.avatar.worn.children.length>0,null,{timeout:60000});
   assert.equal(await page.evaluate(()=>__castle.avatar.worn.children[0]?.layers.mask),8);
   if(process.env.TEST_OUTPUT){fs.mkdirSync(process.env.TEST_OUTPUT,{recursive:true});await page.screenshot({path:process.env.TEST_OUTPUT+'/crown-fixed.png'});}
   await page.reload();await page.locator('#quickEdit').click();
@@ -79,20 +86,40 @@ const url=process.argv[2]||'http://127.0.0.1:8765/';
     bounds=size?[{x:-size/2,z:-size/2},{x:size/2,z:-size/2},{x:size/2,z:size/2},{x:-size/2,z:size/2}]:[];
     g.opts.roomSize='auto';try{await g.enterVR();r['bounds'+size]={built:[g.W,g.D],ended:session.ended};}catch(e){r['bounds'+size]={error:e.message,ended:session.ended};}
    }
-   await session.end();g.opts.roomSize='2.5';await g.enterVR();
+   // Guardian-fit mode: a reset may change the bounds, so the session restarts.
+   {let called=false;g.onResetVR=()=>{called=true;};ref.dispatchEvent(new Event('reset'));await Promise.resolve();r.autoReset={called,ended:session.ended};}
+   if(!session.ended)await session.end();g.opts.roomSize='2.5';await g.enterVR();
    const q=new T.Quaternion().setFromEuler(new T.Euler(0,.7,0));
    g.calibrateXR({transform:{position:{x:.6,y:1.2,z:-.4},orientation:q}});
    g.camera.position.set(.6,1.2,-.4);g.camera.quaternion.copy(q);g.scene.updateMatrixWorld(true);
    r.head=g.headPos().toArray();r.forward=g.camera.getWorldDirection(new T.Vector3()).toArray();
    g.rig.position.y=7.2;g.scene.updateMatrixWorld(true);r.liftedHead=g.headPos().toArray();
-   let reset=false;g.onResetVR=()=>{reset=true;};ref.dispatchEvent(new Event('reset'));await Promise.resolve();r.reset={called:reset,ended:session.ended};
+   // Measured mode, reset WITH a transform (off-centre, rotated, mid-lift): the castle must stay on
+   // the same physical spot. A physical point p has old coords p_old and new coords T^-1 p_old.
+   const resets=[];
+   for(const [px,pz,yaw,lift] of [[0,0,0,0],[1.1,-0.7,0.4,7.2],[-0.9,0.8,-1.2,3.6]]){
+    g.rig.position.y=lift;g.rig.updateMatrixWorld(true);
+    const pOld=new T.Vector3(px,1.3,pz),before=pOld.clone().applyMatrix4(g.rig.matrixWorld);
+    const tq=new T.Quaternion().setFromEuler(new T.Euler(0,yaw,0)),tp=new T.Vector3(0.5+px,0,-0.3+pz);
+    const ev=new Event('reset');ev.transform={position:{x:tp.x,y:tp.y,z:tp.z},orientation:{x:tq.x,y:tq.y,z:tq.z,w:tq.w}};
+    let called=false;g.onResetVR=()=>{called=true;};ref.dispatchEvent(ev);await Promise.resolve();
+    g.rig.updateMatrixWorld(true);
+    const pNew=pOld.clone().applyMatrix4(new T.Matrix4().compose(tp,tq,new T.Vector3(1,1,1)).invert());
+    resets.push({drift:before.distanceTo(pNew.applyMatrix4(g.rig.matrixWorld)),y:g.rig.position.y,lift,called,ended:session.ended,prompt:!!g.centerPrompt});
+   }
+   r.transformResets=resets;
+   // Measured mode, reset WITHOUT a transform: keep playing, ask her to walk back to the middle.
+   {let called=false;g.onResetVR=()=>{called=true;};ref.dispatchEvent(new Event('reset'));await Promise.resolve();
+    r.noTransformReset={prompt:g.centerPrompt,called,ended:session.ended,calibratingBefore:!!g.xrCalibrating};g.confirmCenter();r.noTransformReset.calibratingAfter=g.xrCalibrating;r.noTransformReset.promptAfter=g.centerPrompt;}
    Object.assign(g.renderer.xr,methods);Object.defineProperty(navigator,'xr',{configurable:true,value:original});return r;
   });
   for(const key of ['bounds1.4','bounds0']){assert.ok(xr[key].error,key);assert.ok(xr[key].ended,key);}
   assert.ok(xr.bounds3.built.every(n=>n>=1.6&&n<=2.7));assert.ok(xr.exactSpace);
   assert.ok(Math.abs(xr.head[0])<1e-9&&Math.abs(xr.head[2])<1e-9);assert.ok(Math.abs(xr.head[1]-1.2)<1e-9);
   assert.ok(Math.abs(xr.forward[0])<1e-9&&Math.abs(xr.forward[2]+1)<1e-9);assert.ok(Math.abs(xr.liftedHead[1]-8.4)<1e-9);
-  assert.deepEqual(xr.reset,{called:true,ended:true});
+  assert.deepEqual(xr.autoReset,{called:true,ended:true});
+  for(const t of xr.transformResets){assert.ok(t.drift<1e-9,'drift '+t.drift);assert.equal(t.y,t.lift);assert.equal(t.called,false);assert.equal(t.ended,false);assert.equal(t.prompt,false);}
+  assert.deepEqual(xr.noTransformReset,{prompt:true,called:false,ended:false,calibratingBefore:false,calibratingAfter:true,promptAfter:false});
   await page.goto(url+'?player=Grade4Regression&grade=4');await page.locator('#quickEdit').click();
   await page.locator('#homework').fill('Fraction | 7/8\nNegative decimal | -4.5\nWhich symbol? | < | <; >; =');await page.locator('#hwOnly').check();await page.locator('#deskBtn').click();await page.waitForFunction(()=>window.__castle?.props);
   const grade4=await page.evaluate(()=>{

@@ -48,42 +48,80 @@
   .chip.on { border-color: #ffd54a; background: #6a54b8; }
   .sw { width: 34px; height: 34px; border-radius: 50%; border: 3px solid rgba(255,255,255,0.3); cursor: pointer; }
   .sw.on { border-color: #ffd54a; box-shadow: 0 0 0 2px #ffd54a; }
+  #setup { padding-top: 0; }
+  .banner { position: relative; max-width: 900px; margin: 0 auto 8px; border-radius: 0 0 24px 24px; overflow: hidden; height: clamp(230px, 42vw, 420px); background: #3a2466 url('assets/title.jpg') 70% 55% / cover no-repeat; }
+  .banner .titleText { position: absolute; left: 4%; top: 8%; width: min(48%, 380px); }
+  .banner h1 { text-align: left; font-size: clamp(28px, 5vw, 50px); margin: 0 0 6px; }
+  .banner p { margin: 0; color: #f3eaff; font-size: clamp(13px, 1.8vw, 18px); text-shadow: 0 1px 3px #2b1a4a; }
+  .family { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .fam { border: 3px solid #6a54b8; background: #2b1a4a; color: #fff; border-radius: 18px; padding: 12px 6px; cursor: pointer; font: inherit; text-align: center; }
+  .fam .dot { width: 54px; height: 54px; border-radius: 50%; margin: 0 auto 6px; display: grid; place-items: center; font-size: 26px; font-weight: bold; border: 3px solid #ffd54a; }
+  .fam b { display: block; font-size: 20px; } .fam small { color: #cfc2f0; }
+  .fam.on { border-color: #ffd54a; background: #4a3480; }
+  .playRow { display: flex; gap: 10px; flex-wrap: wrap; } .playRow .go { flex: 2; min-width: 220px; } .playRow #deskBtn { flex: 1; min-width: 160px; }
+  details#parent { background: rgba(255,255,255,0.05); border: 2px dashed rgba(224,184,74,0.35); border-radius: 18px; padding: 10px 14px; margin: 16px 0; }
+  details#parent > summary { cursor: pointer; font-size: 18px; color: #ffe9a8; padding: 4px; }
+  @media (max-width: 560px) { .family { grid-template-columns: repeat(2, 1fr); } }
 </style>
 </head>
 <body>
-<div id="setup"><div class="card">
-  <h1>👑 Crown of Numeria</h1>
-  <p class="sub">Climb the magic tower! Solve each floor's Magic Lock, open the treasure chests, and claim the crown at the top.</p>
+<div id="setup">
+  <div class="banner" role="img" aria-label="A storybook castle with a friendly purple dragon">
+    <div class="titleText"><h1>👑 Crown of Numeria</h1><p>Climb the magic tower! Solve each Magic Lock, open the treasure chests, and claim the crown at the top.</p></div>
+  </div>
+  <div class="card">
   <section id="quick" style="display:none;text-align:center">
     <h2 id="quickHi" style="font-size:28px"></h2>
     <button class="go" id="quickVr" disabled>Checking for VR…</button>
-    <p class="note"><small class="link" id="quickEdit">change hero, settings or homework</small></p>
-  </section>
-  <div id="settingsBody">
-
-  <section>
-    <h2>Who is exploring?</h2>
-    <div class="row profiles" id="profiles"></div>
-    <label>Explorer name <input type="text" id="name" maxlength="20" placeholder="Type your name"></label>
-    <div class="row" style="margin-top:8px">
-      <button class="grade" data-grade="2">2nd Grade</button>
-      <button class="grade" data-grade="4">4th Grade</button>
-    </div>
+    <p class="note"><small class="link" id="quickEdit">grown-up settings or homework</small></p>
   </section>
 
-  <section>
-    <h2>Choose your hero</h2>
+  <section id="who">
+    <h2>Who's playing?</h2>
+    <div class="family" id="family"></div>
+    <div class="row profiles" id="profiles" style="margin-top:10px"></div>
+    <p class="note"><small class="link" id="someoneElse">Someone else</small></p>
+  </section>
+
+  <section id="heroSec">
     <div class="avatarBox">
       <canvas id="avPreview" width="400" height="560"></canvas>
       <div class="avOpts">
-        <h3>Hero</h3><div class="chips" id="avStyle"></div>
+        <h3 id="heroHi">Choose your hero</h3>
+        <div class="chips" id="avStyle"></div>
         <h3>Outfit color</h3><div class="chips" id="avOutfit"></div>
-        <h3>Hair</h3><div class="chips" id="avHairStyle"></div>
-        <div class="chips" id="avHair" style="margin-top:6px"></div>
-        <h3>Skin</h3><div class="chips" id="avSkin"></div>
       </div>
     </div>
-    <p class="note">She'll see her hero in the magic mirrors inside the tower.</p>
+    <p class="note">You'll see your hero in the magic mirrors inside the tower.</p>
+  </section>
+
+  <div class="playRow">
+    <button class="go" id="vrBtn" disabled>Checking for VR…</button>
+    <button class="go" id="deskBtn">Play on this screen</button>
+  </div>
+  <p class="note" id="vrNote"></p>
+
+  <details id="parent">
+  <summary>Grown-up settings: grade, homework, play area</summary>
+  <div id="settingsBody">
+  <section>
+    <h2>Player</h2>
+    <label>Name <input type="text" id="name" maxlength="20" placeholder="Type a name"></label>
+    <div class="row" style="margin-top:8px">
+      <button class="grade" data-grade="2">2nd Grade maths</button>
+      <button class="grade" data-grade="4">4th Grade maths</button>
+    </div>
+    <div id="lookBox">
+      <h3 style="color:#ffe9a8;font-size:15px;margin:12px 0 6px">Hair</h3><div class="chips" id="avHairStyle"></div>
+      <div class="chips" id="avHair" style="margin-top:6px"></div>
+    </div>
+    <h3 style="color:#ffe9a8;font-size:15px;margin:12px 0 6px">Skin</h3><div class="chips" id="avSkin"></div>
+  </section>
+
+  <section>
+    <h2>Family names</h2>
+    <p class="note">Saved only on this headset, never online. Bookmark links with <b>&amp;look=older</b>, <b>younger</b>, <b>mom</b> or <b>dad</b> fill these in automatically.</p>
+    <div id="familyNames"></div>
   </section>
 
   <section>
@@ -116,11 +154,8 @@
     </label>
     <p class="note">For a measured size, stand in the middle and face forward until the castle appears. That spot becomes the room centre, with the Magic Lock ahead. Pick a size a little smaller than the clear space inside the Guardian. Automatic fit uses the Guardian's centre and direction; if its bounds are unavailable or too small, choose a measured size.</p>
   </section>
-
-  <button class="go" id="vrBtn" disabled>Checking for VR…</button>
-  <button class="go" id="deskBtn">Play on this screen (mouse + keyboard)</button>
   </div>
-  <p class="note" id="vrNote"></p>
+  </details>
 </div></div>
 
 <div id="hud"></div>
@@ -133,11 +168,13 @@
 <script type="module">
 import { Game } from './js/game.js';
 import { MODULES, parseHomework } from './js/problems.js';
-import { AVATAR_OPTIONS, DEFAULT_AVATAR, avatarPreview } from './js/avatar.js';
+import { AVATAR_OPTIONS, DEFAULT_AVATAR, FAMILY, familyDefaults, identityForName, avatarPreview } from './js/avatar.js';
 
 const $ = (id) => document.getElementById(id);
 const store = { get: (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } }, set: (k, v) => localStorage.setItem(k, JSON.stringify(v)) };
 let grade = null;
+const familyNames = () => store.get('mathcastle.family', {});
+const famName = (id) => familyNames()[id] || FAMILY[id].label;
 let avatar = { ...DEFAULT_AVATAR };
 const preview = avatarPreview($('avPreview'));
 function renderAvatarPicker() {
@@ -147,8 +184,34 @@ function renderAvatarPicker() {
   swatchRow('avOutfit', AVATAR_OPTIONS.outfit, 'outfit');
   chipRow('avHairStyle', AVATAR_OPTIONS.hairStyle, 'hairStyle');
   swatchRow('avHair', AVATAR_OPTIONS.hair, 'hair');
-  swatchRow('avSkin', AVATAR_OPTIONS.skin, 'skin');
+  const fam = FAMILY[avatar.identity];
+  swatchRow('avSkin', fam ? [fam.skin, ...AVATAR_OPTIONS.skin.filter((c) => c !== fam.skin)] : AVATAR_OPTIONS.skin, 'skin');
+  $('lookBox').style.display = fam ? 'none' : ''; // family members keep their own hair
+  $('heroHi').textContent = fam ? `Choose ${famName(avatar.identity)}'s hero` : 'Choose your hero';
   preview.set(avatar);
+  renderFamily();
+}
+function renderFamily() {
+  $('family').innerHTML = '';
+  for (const [id, f] of Object.entries(FAMILY)) {
+    const name = famName(id), s = store.get(profileKey(name), null), g = s?.grade ?? f.grade;
+    const b = document.createElement('button'); b.className = 'fam' + (avatar.identity === id && $('name').value.trim().toLowerCase() === name.toLowerCase() ? ' on' : ''); b.dataset.id = id;
+    b.innerHTML = `<div class="dot" style="background:${(s?.avatar?.outfit) || f.outfit}"></div><b></b><small>${g ? `Grade ${g} maths` : 'Pick a grade'}</small>`;
+    b.querySelector('.dot').textContent = name[0].toUpperCase(); b.querySelector('b').textContent = name;
+    b.onclick = () => chooseFamily(id);
+    $('family').appendChild(b);
+  }
+}
+// Pick a family member: load their saved profile, or start one with their
+// default look (and grade, for the girls). Existing choices are never overwritten.
+function chooseFamily(id) {
+  const f = FAMILY[id], name = famName(id);
+  if (store.get(profileKey(name), null)) return loadProfile(name);
+  $('name').value = name; $('homework').value = ''; $('hwOnly').checked = false;
+  avatar = familyDefaults(id);
+  setGrade(f.grade, null);
+  renderAvatarPicker();
+  if (!f.grade) { $('parent').open = true; $('hwStatus').className = 'note'; $('hwStatus').textContent = `Pick a maths grade for ${name} above.`; }
 }
 
 function profileKey(name) { return `mathcastle.settings.${(name || 'explorer').toLowerCase()}`; }
@@ -180,7 +243,10 @@ function loadProfile(name) {
   const s = store.get(profileKey(name), null);
   if (!s) return;
   $('name').value = s.name; $('homework').value = s.homework || ''; $('hwOnly').checked = !!s.homeworkOnly;
-  avatar = { ...DEFAULT_AVATAR, ...(s.avatar || {}) }; renderAvatarPicker(); $('music').value = String(s.music ?? 0.35);
+  // profiles saved before family identities existed get one from their name
+  avatar = { ...DEFAULT_AVATAR, ...(s.avatar || {}) };
+  if (!s.avatar?.identity) avatar.identity = identityForName(s.name, familyNames()) || 'custom';
+  renderAvatarPicker(); $('music').value = String(s.music ?? 0.35);
   $('perDoor').value = String(s.perDoor || 2); $('roomSize').value = s.roomSize || '2.5';
   setGrade(s.grade, s.moduleIds);
 }
@@ -197,7 +263,7 @@ function renderProfiles() {
 }
 function collect() {
   const name = $('name').value.trim() || 'Explorer';
-  if (!grade) { alert('Pick 2nd grade or 4th grade first.'); return null; }
+  if (!grade) { $('parent').open = true; alert('Pick 2nd grade or 4th grade maths in Grown-up settings first.'); return null; }
   const moduleIds = [...document.querySelectorAll('#mods input:checked')].map((i) => i.value);
   if (!moduleIds.length && !$('hwOnly').checked) { alert('Pick at least one module.'); return null; }
   const { problems: hw, errors } = parseHomework($('homework').value, grade);
@@ -230,6 +296,19 @@ $('noMods').onclick = () => document.querySelectorAll('#mods input').forEach((i)
 $('homework').addEventListener('input', checkHomework);
 $('deskBtn').onclick = () => start(false);
 $('vrBtn').onclick = () => start(true);
+$('someoneElse').onclick = () => { $('name').value = ''; avatar = { ...DEFAULT_AVATAR }; renderAvatarPicker(); $('parent').open = true; $('name').focus(); };
+$('name').addEventListener('input', () => { if (FAMILY[avatar.identity] && $('name').value.trim().toLowerCase() !== famName(avatar.identity).toLowerCase()) { avatar = { ...avatar, identity: 'custom' }; renderAvatarPicker(); } });
+function renderFamilyNames() {
+  const names = familyNames();
+  $('familyNames').innerHTML = '';
+  for (const [id, f] of Object.entries(FAMILY)) {
+    const lab = document.createElement('label'); lab.textContent = `${f.label} `;
+    const inp = document.createElement('input'); inp.type = 'text'; inp.maxLength = 20; inp.value = names[id] || ''; inp.placeholder = f.label; inp.dataset.id = id;
+    inp.addEventListener('change', () => { const n = familyNames(); n[id] = inp.value.trim(); store.set('mathcastle.family', n); renderFamily(); });
+    lab.appendChild(inp); $('familyNames').appendChild(lab);
+  }
+}
+renderFamilyNames();
 
 renderProfiles();
 renderMods();
@@ -238,8 +317,12 @@ renderAvatarPicker();
 const params = new URLSearchParams(location.search);
 const qp = params.get('player'), qg = Number(params.get('grade'));
 if (qp) {
+  // a private bookmark can name a family look: ?player=NAME&grade=4&look=older
+  const look = params.get('look');
+  if (FAMILY[look] && !familyNames()[look]) { store.set('mathcastle.family', { ...familyNames(), [look]: qp }); renderFamilyNames(); renderFamily(); }
   if (!store.get(profileKey(qp), null) && (qg === 2 || qg === 4)) {
-    store.set(profileKey(qp), { name: qp, grade: qg, moduleIds: MODULES[qg].map((m) => m.id), perDoor: 2, roomSize: '2.5', homework: '', homeworkOnly: false });
+    const fid = identityForName(qp, familyNames());
+    store.set(profileKey(qp), { name: qp, grade: qg, moduleIds: MODULES[qg].map((m) => m.id), perDoor: 2, roomSize: '2.5', homework: '', homeworkOnly: false, ...(fid ? { avatar: familyDefaults(fid) } : {}) });
     const names = store.get('mathcastle.profiles', []);
     if (!names.some((n) => n.toLowerCase() === qp.toLowerCase())) store.set('mathcastle.profiles', [...names, qp]);
     renderProfiles();
@@ -248,9 +331,9 @@ if (qp) {
     loadProfile(qp);
     const qr = params.get('room');
     if (qr && [...$('roomSize').options].some((o) => o.value === qr)) $('roomSize').value = qr;
-    $('quick').style.display = 'block'; $('settingsBody').style.display = 'none';
+    $('quick').style.display = 'block'; $('who').style.display = 'none'; $('vrBtn').style.display = 'none';
     $('quickHi').textContent = `Ready, ${store.get(profileKey(qp)).name}?`;
-    $('quickEdit').onclick = () => { $('settingsBody').style.display = 'block'; };
+    $('quickEdit').onclick = () => { $('parent').open = true; $('who').style.display = ''; $('parent').scrollIntoView({ behavior: 'smooth' }); };
     $('quickVr').onclick = () => start(true);
   }
 } else {
@@ -271,7 +354,7 @@ if (navigator.xr) {
 const auto = sessionStorage.getItem('mathcastle.autostart');
 if (auto) { sessionStorage.removeItem('mathcastle.autostart'); if (auto === 'desk') start(false); }
 const notice = sessionStorage.getItem('mathcastle.notice');
-if (notice) { sessionStorage.removeItem('mathcastle.notice'); $('settingsBody').style.display = 'block'; const message = document.createElement('p'); message.className = 'err'; message.textContent = notice; $('settingsBody').prepend(message); }
+if (notice) { sessionStorage.removeItem('mathcastle.notice'); $('parent').open = true; const message = document.createElement('p'); message.className = 'err'; message.textContent = notice; $('settingsBody').prepend(message); }
 </script>
 </body>
 </html>

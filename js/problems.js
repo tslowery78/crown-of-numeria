@@ -17,10 +17,10 @@ const G2 = [
   {
     id: 'g2m1', name: 'Module 1: Add & subtract facts within 20',
     gens: [
-      () => { const a = R(3, 10), b = R(3, 10); return { text: `${a} + ${b} = ?`, answer: `${a + b}`, hint: 'Make a ten! Start with the bigger number and count on.' }; },
-      () => { const c = R(11, 20), b = R(3, 9); return { text: `${c} − ${b} = ?`, answer: `${c - b}`, hint: `Take away to get to 10 first, then take away the rest.` }; },
-      () => { const a = R(3, 12), s = R(a + 2, 20); return { text: `${a} + ? = ${s}`, answer: `${s - a}`, hint: `Count up from ${a} to ${s}.` }; },
-      () => { const a = R(4, 9); return { text: `A dragon has ${a} red eggs and ${a + 1} blue eggs.\nHow many eggs in all?`, answer: `${2 * a + 1}`, hint: `Use a double: ${a} + ${a}, then add 1 more.` }; },
+      () => { const a = R(3, 10), b = R(3, 10); return { text: `${a} + ${b} = ?`, answer: `${a + b}`, hint: 'Make a ten! Start with the bigger number and count on.', manip: { layout: 'ten', start: a, value: 'total' } }; },
+      () => { const c = R(11, 20), b = R(3, 9); return { text: `${c} − ${b} = ?`, answer: `${c - b}`, hint: `Take away to get to 10 first, then take away the rest.`, manip: { layout: 'ten', start: c, value: 'total' } }; },
+      () => { const a = R(3, 12), s = R(a + 2, 20); return { text: `${a} + ? = ${s}`, answer: `${s - a}`, hint: `Count up from ${a} to ${s}.`, manip: { layout: 'ten', start: a, value: 'added' } }; },
+      () => { const a = R(4, 9); return { text: `A dragon has ${a} red eggs and ${a + 1} blue eggs.\nHow many eggs in all?`, answer: `${2 * a + 1}`, hint: `Use a double: ${a} + ${a}, then add 1 more.`, manip: { layout: 'ten', start: a, value: 'total' } }; },
     ],
   },
   {
@@ -65,9 +65,9 @@ const G2 = [
   {
     id: 'g2m6', name: 'Module 6: Equal groups, arrays, even & odd',
     gens: [
-      () => { const g = R(2, 5), n = R(2, 5); return { text: `${g} groups of ${n} = ?`, answer: `${g * n}`, hint: `Add ${n} a total of ${g} times.` }; },
-      () => { const r = R(2, 5), c = R(2, 5); return { text: `The knights stand in ${r} rows.\nThere are ${c} knights in each row.\nHow many knights in all?`, answer: `${r * c}`, hint: `Add ${c} for each row: ${Array(r).fill(c).join(' + ')}.` }; },
-      () => { const n = R(2, 5), k = R(3, 5); return { text: `${Array(k).fill(n).join(' + ')} = ?`, answer: `${n * k}`, hint: `Skip count by ${n}s.` }; },
+      () => { const g = R(2, 5), n = R(2, 5); return { text: `${g} groups of ${n} = ?`, answer: `${g * n}`, hint: `Add ${n} a total of ${g} times.`, manip: { layout: 'groups', groups: g, per: n, start: 0, value: 'total' } }; },
+      () => { const r = R(2, 5), c = R(2, 5); return { text: `The knights stand in ${r} rows.\nThere are ${c} knights in each row.\nHow many knights in all?`, answer: `${r * c}`, hint: `Add ${c} for each row: ${Array(r).fill(c).join(' + ')}.`, manip: { layout: 'groups', groups: r, per: c, start: 0, value: 'total' } }; },
+      () => { const n = R(2, 5), k = R(3, 5); return { text: `${Array(k).fill(n).join(' + ')} = ?`, answer: `${n * k}`, hint: `Skip count by ${n}s.`, manip: { layout: 'groups', groups: k, per: n, start: 0, value: 'total' } }; },
       () => { const n = R(5, 40); return { text: `Is ${n} even or odd?`, answer: n % 2 ? 'odd' : 'even', choices: ['even', 'odd'], hint: 'Look at the ones digit. 0, 2, 4, 6, 8 are even.' }; },
       () => { const n = R(6, 20); return { text: `Double ${n}. What is ${n} + ${n}?`, answer: `${2 * n}`, hint: 'Doubles: add the number to itself.' }; },
     ],
@@ -151,12 +151,12 @@ const G4 = [
   {
     id: 'g4m5', name: 'Module 5: Fractions',
     gens: [
-      () => { const d = pick([4, 5, 6, 8, 10, 12]), a = R(1, d - 2), b = R(1, d - 1 - a); return { text: `${a}/${d} + ${b}/${d} = ?`, answer: `${a + b}/${d}`, hint: 'Same denominator: add the numerators, keep the denominator.' }; },
-      () => { const d = pick([4, 5, 6, 8, 10, 12]), a = R(3, d), b = R(1, a - 1); return { text: `${a}/${d} − ${b}/${d} = ?`, answer: `${a - b}/${d}`, hint: 'Same denominator: subtract the numerators, keep the denominator.' }; },
+      () => { const d = pick([4, 5, 6, 8, 10, 12]), a = R(1, d - 2), b = R(1, d - 1 - a); return { text: `${a}/${d} + ${b}/${d} = ?`, answer: `${a + b}/${d}`, hint: 'Same denominator: add the numerators, keep the denominator.', manip: { layout: 'frac', denom: d, start: a, value: 'frac' } }; },
+      () => { const d = pick([4, 5, 6, 8, 10, 12]), a = R(3, d), b = R(1, a - 1); return { text: `${a}/${d} − ${b}/${d} = ?`, answer: `${a - b}/${d}`, hint: 'Same denominator: subtract the numerators, keep the denominator.', manip: { layout: 'frac', denom: d, start: a, value: 'frac' } }; },
       () => { const b = pick([2, 3, 4, 5, 6]), a = R(1, b - 1), k = R(2, 5); return { text: `${a}/${b} = ?/${b * k}`, answer: `${a * k}`, hint: `The denominator was multiplied by ${k}. Do the same to the numerator.` }; },
       () => { let a, b, c, d; do { b = pick([2, 3, 4, 5, 6, 8, 10, 12]); d = pick([2, 3, 4, 5, 6, 8, 10, 12]); a = R(1, b - 1); c = R(1, d - 1); } while (b === d && a === c); return { text: `Which symbol makes this true?\n${a}/${b}  __  ${c}/${d}`, answer: cmp(a * d, c * b), choices: CMP_CHOICES, hint: 'Compare each to 1/2, or rewrite them with the same denominator.' }; },
-      () => { const d = pick([5, 6, 8, 10]), a = R(3, d - 1), b = R(1, a - 1); return { text: `${a}/${d} = ${b}/${d} + ?`, answer: `${a - b}/${d}`, hint: 'Decompose: what fraction do you add to get the total?' }; },
-      () => { const d = pick([6, 8, 10, 12]), a = R(1, Math.floor(d / 2) - 1), b = R(1, d - 1 - a); return { text: `A wizard drinks ${a}/${d} of a potion in the morning\nand ${b}/${d} at night.\nHow much of the potion did he drink?`, answer: `${a + b}/${d}`, hint: 'Add the fractions. The denominator stays the same.' }; },
+      () => { const d = pick([5, 6, 8, 10]), a = R(3, d - 1), b = R(1, a - 1); return { text: `${a}/${d} = ${b}/${d} + ?`, answer: `${a - b}/${d}`, hint: 'Decompose: what fraction do you add to get the total?', manip: { layout: 'frac', denom: d, start: b, value: 'fracAdded' } }; },
+      () => { const d = pick([6, 8, 10, 12]), a = R(1, Math.floor(d / 2) - 1), b = R(1, d - 1 - a); return { text: `A wizard drinks ${a}/${d} of a potion in the morning\nand ${b}/${d} at night.\nHow much of the potion did he drink?`, answer: `${a + b}/${d}`, hint: 'Add the fractions. The denominator stays the same.', manip: { layout: 'frac', denom: d, start: a, value: 'frac' } }; },
     ],
   },
   {

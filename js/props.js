@@ -182,7 +182,7 @@ export class Props {
     this.makePins(3, hw - 0.5, hd - 0.8);
     // Floor 5: Crystal Chamber — chiming crystals + bubble cauldron
     const y4 = fy(4);
-    [['#8fdcff', 72], ['#d49bff', 76], ['#ff9ad1', 79]].forEach(([c, n], k) => { const b = this.add('crystal', 4, at(-0.45 + k * 0.45, y4 + 0.1, -0.55), c); b.note = n; });
+    [['#8fdcff', 72], ['#d49bff', 76], ['#ff9ad1', 79]].forEach(([c, n], k) => { const b = this.add('crystal', 4, at(-0.45 + k * 0.45, y4 + 0.09, -0.55), c); b.note = n; });
     this.cauldron = this.makeCauldron(); this.cauldron.position.set(-hw + 0.35, y4, hd - 0.35); g.world.add(this.cauldron);
     this.bubbleT = 0;
     // Tower Top — balls to throw off the tower

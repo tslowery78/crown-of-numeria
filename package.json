@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "test": "node --test tests/problems.test.mjs && node tests/generated-math.mjs",
-    "test:browser": "node tests/browser.cjs"
+    "test:browser": "node tests/browser.cjs",
+    "test:browser:files": "node tests/browser.cjs http://castle.test/ --files"
   },
   "devDependencies": { "playwright": "1.62.1" }
 }

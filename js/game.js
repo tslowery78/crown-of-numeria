@@ -10,6 +10,7 @@ import { ProblemSource, isCorrect, speakable } from './problems.js';
 import { AudioEngine, FLOOR_MOODS } from './audio.js';
 import { buildAvatar, AvatarRig, MIRROR_LAYER } from './avatar.js';
 import { Props } from './props.js';
+import { GemTray } from './tray.js';
 
 // ------------------------------------------------------------ layout
 const FH = 3.6, SLAB = 0.4, CEIL = FH - SLAB, WALL_T = 0.3, HATCH = 1.2;
@@ -89,23 +90,24 @@ function surfaceMaps(kind, base) {
     }
     noise(c, S, S, 1800, 0.07);
   } else {
-    const rows = kind === 'tile' ? 4 : 8, rh = S / rows, bw = kind === 'tile' ? S / 4 : 128;
-    c.fillStyle = shade(0.45); c.fillRect(0, 0, S, S);
+    // broad, quiet sandstone blocks with shallow joints (tile = floor slabs)
+    const rows = kind === 'tile' ? 3 : 5, rh = S / rows, bw = kind === 'tile' ? S / 3 : S / 3;
+    c.fillStyle = shade(0.8); c.fillRect(0, 0, S, S);
+    h.fillStyle = '#555'; h.fillRect(0, 0, S, S);
     for (let r = 0; r < rows; r++) {
       const off = kind === 'tile' ? 0 : r % 2 ? bw / 2 : 0;
       for (let x = -off; x < S; x += bw) {
-        const k = 0.78 + Math.random() * 0.34, gap = 4, x0 = x + gap, y0 = r * rh + gap, ww = bw - 2 * gap, hh = rh - 2 * gap;
+        const k = 0.93 + Math.random() * 0.12, gap = 2, x0 = x + gap, y0 = r * rh + gap, ww = bw - 2 * gap, hh = rh - 2 * gap;
         c.fillStyle = shade(k); c.fillRect(x0, y0, ww, hh);
-        const g = c.createLinearGradient(0, y0, 0, y0 + hh); g.addColorStop(0, 'rgba(255,255,255,0.12)'); g.addColorStop(0.2, 'rgba(255,255,255,0)'); g.addColorStop(0.85, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,0.22)');
+        const g = c.createLinearGradient(0, y0, 0, y0 + hh); g.addColorStop(0, 'rgba(255,255,255,0.06)'); g.addColorStop(0.25, 'rgba(255,255,255,0)'); g.addColorStop(0.85, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,0.08)');
         c.fillStyle = g; c.fillRect(x0, y0, ww, hh);
-        for (let b = 0; b < 6; b++) { const v = 90 + b * 30 + Math.random() * 20; h.fillStyle = `rgb(${v},${v},${v})`; h.fillRect(x0 + b, y0 + b, ww - 2 * b, hh - 2 * b); }
-        if (Math.random() < 0.25) { c.strokeStyle = 'rgba(0,0,0,0.25)'; c.beginPath(); c.moveTo(x0 + Math.random() * ww, y0); c.lineTo(x0 + Math.random() * ww, y0 + hh); c.stroke(); }
+        for (let b = 0; b < 4; b++) { const v = 150 + b * 25; h.fillStyle = `rgb(${v},${v},${v})`; h.fillRect(x0 + b, y0 + b, ww - 2 * b, hh - 2 * b); }
       }
     }
-    noise(c, S, S, 3500, 0.1); noise(h, S, S, 2500, 0.08);
+    noise(c, S, S, 1200, 0.035); noise(h, S, S, 800, 0.04);
   }
   const map = new THREE.CanvasTexture(col); map.colorSpace = THREE.SRGBColorSpace; map.wrapS = map.wrapT = THREE.RepeatWrapping; map.anisotropy = 4;
-  return { map, normalMap: normalFromHeight(hgt, kind === 'wood' ? 1.5 : 3) };
+  return { map, normalMap: normalFromHeight(hgt, kind === 'wood' ? 1.2 : 1.1) };
 }
 
 // Scale a geometry's UVs so textures tile at `tile` meters regardless of size.
@@ -207,6 +209,7 @@ class Panel {
   newProblem() {
     this.problem = this.game.source.next();
     this.input = ''; this.wrong = 0; this.msg = ''; this.firstTry = true;
+    this.onProblem?.(this.problem);
     this.draw();
   }
   layoutButtons() {
@@ -335,7 +338,9 @@ class Panel {
       else if (this.wrong === 2) { this.msg = `Hint: ${this.problem.hint}`; this.msgColor = '#ffd86b'; }
       else {
         this.msg = `The answer is ${this.problem.answer}. Let's try a new one!`; this.msgColor = '#ff9a9a';
-        this.busyUntil = performance.now() + 3500; this.after = () => this.newProblem();
+        // hands-on problems replay the operation on the gem tray before moving on
+        const tray = this.game.tray, demo = this.problem.manip && tray?.panel === this ? tray.demo(this.problem.answer) : 0;
+        this.busyUntil = performance.now() + Math.max(3500, demo * 1000 + 1500); this.after = () => this.newProblem();
       }
     }
     this.draw();
@@ -388,6 +393,7 @@ export function fitRoom(pts) {
 
 // ------------------------------------------------------------ the game
 export class Game {
+  makeSign(text, o) { return makeSign(text, o); }
   constructor(opts) {
     this.opts = opts; // { name, grade, moduleIds, perDoor, homework, homeworkOnly, roomSize, avatar, music }
     this.audio = this.sfx = new AudioEngine({ musicVolume: opts.music ?? 0.5 });
@@ -436,9 +442,13 @@ export class Game {
       const reference = this.renderer.xr.getReferenceSpace();
       // Recentering (long-press of the Meta button) resets the space. In measured-size mode just
       // re-centre the room on where she now stands and keep her progress; Guardian-fit mode restarts.
-      const reset = () => {
-        if (type === 'local-floor') { this.xrCalibrating = true; return; }
-        this.xrReset = true; session.end().catch(() => {});
+      // Recentering (long-press of the Meta button) resets the space. In measured-size mode keep
+      // her progress and keep the castle on the same physical spot: apply the reset transform, or,
+      // if the headset gives none, ask her to walk back to the middle. Guardian-fit mode restarts.
+      const reset = (ev) => {
+        if (type !== 'local-floor') { this.xrReset = true; session.end().catch(() => {}); return; }
+        if (ev?.transform) this.applyResetTransform(ev.transform);
+        else this.askForCenter();
       };
       reference.addEventListener('reset', reset);
       session.addEventListener('end', () => {
@@ -453,6 +463,29 @@ export class Game {
       await session.end().catch(() => {});
       throw e;
     }
+  }
+
+  // A reference-space reset moves the origin; `t` is the new origin expressed in the old
+  // coordinates (p_old = T·p_new). Keeping physical points fixed in the world needs
+  // rig_new = rig_old·T. Height stays with the current floor.
+  applyResetTransform(t) {
+    const T = new THREE.Matrix4().compose(new THREE.Vector3(t.position.x, t.position.y, t.position.z), new THREE.Quaternion(t.orientation.x, t.orientation.y, t.orientation.z, t.orientation.w), new THREE.Vector3(1, 1, 1));
+    this.rig.updateMatrix();
+    const M = this.rig.matrix.clone().multiply(T), p = new THREE.Vector3(), q = new THREE.Quaternion(), sc = new THREE.Vector3();
+    M.decompose(p, q, sc);
+    const yaw = new THREE.Euler().setFromQuaternion(q, 'YXZ').y;
+    this.rig.position.set(p.x, this.rig.position.y, p.z); this.rig.rotation.set(0, yaw, 0);
+    this.rig.updateMatrixWorld(true);
+  }
+  // No reset transform: pause re-centring until she stands in the middle and pinches.
+  askForCenter() {
+    this.centerPrompt = true;
+    this.centerSign ??= makeSign('Walk to the middle of your play space, face the Magic Lock wall, then pinch or pull the trigger.', { w: 1.1, h: 0.36, size: 64, bg: '#1f2a44', border: '#7fb2ff', fg: '#e8f0ff' });
+    this.scene.add(this.centerSign);
+  }
+  confirmCenter() {
+    this.centerPrompt = false; this.xrCalibrating = true;
+    if (this.centerSign) this.scene.remove(this.centerSign);
   }
 
   calibrateXR(pose) {
@@ -512,7 +545,7 @@ export class Game {
 
     const S = new StaticBatch(), world = this.world, hw = W / 2, hd = D / 2;
     const Std = (o) => new THREE.MeshStandardMaterial({ roughness: 0.85, ...o });
-    const stoneMaps = surfaceMaps('brick', [150, 138, 120]), darkMaps = surfaceMaps('brick', [110, 100, 92]), tileMaps = surfaceMaps('tile', [140, 132, 124]);
+    const stoneMaps = surfaceMaps('brick', [206, 180, 140]), darkMaps = surfaceMaps('brick', [168, 146, 116]), tileMaps = surfaceMaps('tile', [222, 206, 178]);
     const woodMaps = surfaceMaps('wood', [150, 98, 56]), plankMaps = surfaceMaps('wood', [96, 60, 34]);
     const mats = this.mats = {
       stone: Std({ ...stoneMaps, roughness: 0.92 }), stoneDark: Std({ ...darkMaps, roughness: 0.92 }),
@@ -616,6 +649,8 @@ export class Game {
     this.lights = [0, 1].map(() => { const l = new THREE.PointLight(0xffc27a, 4, 9, 1.4); world.add(l); return l; });
     this.placeLights();
 
+    this.tray = new GemTray(this); world.add(this.tray.group);
+    this.tray.place(0, 0, W, D, this.panelH);
     for (let i = 0; i < TOP; i++) this.makeLock(i);
     for (let i = 0; i < TOP; i++) this.makeChest(i);
     this.makeFinale();
@@ -815,7 +850,7 @@ export class Game {
     const { stoneDark, wood, woodDark, iron, gold, red, flame, Std } = this.mats, y0 = fy(i), hw = W / 2, hd = D / 2;
     if (i === 0) {
       const leaf = Std({ color: 0x2f7d32 }), blue = Std({ color: 0x2a5bd7 }), white = Std({ color: 0xf2f2f2 }), pot = Std({ color: 0xb5653a, roughness: 0.8 });
-      for (const sx of [-1, 1]) {
+      for (const sx of [-1]) { // the right-hand corner holds the maths tray
         const x = sx * (hw - 0.3), z = -hd + 0.25;
         S.add(new THREE.CylinderGeometry(0.2, 0.15, 0.35, 16), pot, [x, 0.175, z]);
         for (let k = 0; k < 9; k++) {
@@ -859,7 +894,7 @@ export class Game {
     }
     if (i === 3) {
       const steel = Std({ color: 0x9aa0ad, metalness: 0.85, roughness: 0.35 });
-      for (const sx of [-1, 1]) {
+      for (const sx of [-1]) { // right-hand corner is kept clear for the maths tray
         const x = sx * (hw - 0.3), z = -hd + 0.3;
         S.box(0.45, 0.1, 0.45, stoneDark, [x, y0 + 0.05, z], [0, 0, 0], 1);
         for (const d of [-0.08, 0.08]) S.add(new THREE.CylinderGeometry(0.055, 0.065, 0.7, 10), steel, [x + d, y0 + 0.45, z]);
@@ -877,7 +912,7 @@ export class Game {
     }
     if (i === 4) {
       const cryA = new THREE.MeshStandardMaterial({ color: 0x8fdcff, emissive: 0x2a6f99, roughness: 0.15, metalness: 0.1 }), cryB = new THREE.MeshStandardMaterial({ color: 0xd49bff, emissive: 0x5c2a8c, roughness: 0.15, metalness: 0.1 });
-      for (const [x, z] of [[-hw + 0.3, -hd + 0.3], [hw - 0.3, -hd + 0.3]]) {
+      for (const [x, z] of [[-hw + 0.3, -hd + 0.3], [-hw + 0.3, 0.2]]) {
         for (let k = 0; k < 6; k++) {
           const h = 0.3 + Math.random() * 0.8;
           S.add(new THREE.ConeGeometry(0.08 + Math.random() * 0.05, h, 6), k % 2 ? cryA : cryB, [x + (Math.random() - 0.5) * 0.3, y0 + h / 2, z + (Math.random() - 0.5) * 0.3], [(Math.random() - 0.5) * 0.4, 0, (Math.random() - 0.5) * 0.4]);
@@ -927,6 +962,7 @@ export class Game {
     panel.floor = i; panel.wallMounted = true;
     const orig = panel.update.bind(panel);
     panel.update = () => { orig(); gems.forEach((g, k) => { const on = k < panel.solved; g.material.color.setHex(on ? 0x4dff9a : 0x555566); g.material.emissive.setHex(on ? 0x1f8a4a : 0); }); };
+    panel.onProblem = (p) => this.tray.bind(panel, p);
     this.world.add(panel.mesh); this.panels.push(panel);
     lock.panel = panel; this.locks.push(lock);
   }
@@ -939,6 +975,7 @@ export class Game {
     this.burst(new THREE.Vector3(0, fy(i) + CEIL - 0.1, 0), 80);
     this.animate(1.4, (t) => { hatch.material.opacity = 1 - t; hatch.scale.set(1 - t * 0.3, 1, 1 - t * 0.3); }, () => { hatch.visible = false; }, 0.3);
     this.retirePanel(lock.panel, 1.4);
+    this.tray.hide();
     this.lift = { state: 'ready', dwell: 0, t: 0 };
     this.setGuide('Step onto the glowing square!');
   }
@@ -1152,7 +1189,7 @@ export class Game {
       this.animate(1.2, (t) => { const h = this.headPos(); h.y += 0.15; crown.position.lerpVectors(from, h, t * t); }, () => {
         this.avatar.hat.visible = false;
         this.avatar.worn.clear();
-        this.avatar.worn.add(crown); crown.position.set(0, 0.1, 0.01); crown.rotation.set(0, 0, 0); crown.scale.setScalar(0.85);
+        this.avatar.worn.add(crown); crown.position.set(0, 0.125, 0.01); crown.rotation.set(0, 0, 0); crown.scale.setScalar(0.85);
         crown.traverse((o) => o.layers.set(MIRROR_LAYER));
         this.audio.cueScore();
         this.floatText('Look in the Royal Mirror!', new THREE.Vector3(-this.W / 2 + 0.5, y0 + 1.9, 0), '#ffd54a', 4);
@@ -1281,10 +1318,10 @@ export class Game {
         if (e.data.handedness === 'left' && !e.data.hand) c.add(this.hudMesh);
       });
       c.addEventListener('disconnected', () => { ptr.src = null; dot.visible = false; if (ptr.holding) this.drop(ptr); });
-      c.addEventListener('selectstart', () => { if (!this.tryGrab(ptr)) this.select(ptr); else ptr.grabBy = 'select'; });
-      c.addEventListener('selectend', () => { if (ptr.holding && ptr.grabBy === 'select') this.drop(ptr); });
+      c.addEventListener('selectstart', () => { if (this.centerPrompt) return this.confirmCenter(); if (!this.tryGrab(ptr)) this.select(ptr); else ptr.grabBy = 'select'; });
+      c.addEventListener('selectend', () => { if ((ptr.holding || ptr.holdingTray) && ptr.grabBy === 'select') this.drop(ptr); });
       c.addEventListener('squeezestart', () => { if (this.tryGrab(ptr)) ptr.grabBy = 'squeeze'; });
-      c.addEventListener('squeezeend', () => { if (ptr.holding && ptr.grabBy === 'squeeze') this.drop(ptr); });
+      c.addEventListener('squeezeend', () => { if ((ptr.holding || ptr.holdingTray) && ptr.grabBy === 'squeeze') this.drop(ptr); });
       this.rig.add(c); this.rig.add(grip);
       const hand = this.renderer.xr.getHand(i);
       hand.userData = { jointGeo, tipMat };
@@ -1339,9 +1376,11 @@ export class Game {
   holder(ptr) { return ptr.desktop ? this.deskHolder : ptr.src?.hand ? ptr.pinch : ptr.grip; }
 
   tryGrab(ptr) {
-    if (!this.props || ptr.holding) return false;
+    if (!this.props || ptr.holding || ptr.holdingTray) return false;
     this.audio.resume();
     const p = this.holdPoint(ptr);
+    // gems on the maths tray come first when a hand is right at the tray
+    if (this.tray?.grabAt(p, this.holder(ptr))) { ptr.holdingTray = true; this.haptic(ptr, 0.3, 20); return true; }
     let b = this.props.nearest(p, ptr.src?.hand ? 0.08 : 0.11);
     // "magic grab": pointing at a prop within 3 m pulls it into the hand
     if (!b && ptr.hit?.type === 'grab' && ptr.hit.distance < 3.2) { b = ptr.hit.body; if (b.worn) this.props.unwear(b); b.mesh.position.copy(p); this.burst(p, 10, 0.02, 1); }
@@ -1350,7 +1389,10 @@ export class Game {
     ptr.holding = b; this.haptic(ptr, 0.4, 30);
     return true;
   }
-  drop(ptr) { const b = ptr.holding; ptr.holding = null; if (b) this.props.release(b); }
+  drop(ptr) {
+    if (ptr.holdingTray) { ptr.holdingTray = false; this.tray.release(this.holder(ptr)); return; }
+    const b = ptr.holding; ptr.holding = null; if (b) this.props.release(b);
+  }
 
   desktopClick() {
     const ptr = this.desktopPtr;
@@ -1384,6 +1426,7 @@ export class Game {
     const targets = [...this.blockers];
     for (const p of this.panels) if (p.mesh.visible) targets.push(p.mesh);
     for (const ch of this.chests) if (!ch.opened && !ch.big) ch.group.traverse((o) => { if (o.isMesh && o.userData.chest) targets.push(o); });
+    if (this.tray) targets.push(...this.tray.pickables());
     if (this.props) {
       for (const b of this.props.bodies) if (!b.held && !b.worn) b.mesh.traverse((o) => { if (o.isMesh) targets.push(o); });
       for (const c of [this.props.cat?.group, this.props.owl?.group]) c?.traverse((o) => { if (o.isMesh) { o.userData.touchable = true; targets.push(o); } });
@@ -1393,6 +1436,7 @@ export class Game {
     const o = hit.object;
     if (o.userData.panel) return { type: 'panel', panel: o.userData.panel, uv: hit.uv, point: hit.point, distance: hit.distance };
     if (o.userData.chest) return { type: 'chest', chest: o.userData.chest, point: hit.point, distance: hit.distance };
+    if (o.userData.traySlot !== undefined) return { type: 'tray', slot: o.userData.traySlot, point: hit.point, distance: hit.distance };
     if (o.userData.grabBody) return { type: 'grab', body: o.userData.grabBody, point: hit.point, distance: hit.distance };
     if (o.userData.touchable) return { type: 'touch', point: hit.point, distance: hit.distance };
     return { type: 'block', point: hit.point, distance: hit.distance };
@@ -1404,6 +1448,7 @@ export class Game {
     if (!h) return;
     if (h.type === 'panel') h.panel.press(h.uv);
     else if (h.type === 'chest') this.openChestPanel(h.chest);
+    else if (h.type === 'tray') this.tray.clickSlot(h.slot);
     else if (h.type === 'touch') this.extraTips.push({ pos: h.point.clone(), vel: new THREE.Vector3(0, 0, -1) });
   }
 
@@ -1454,13 +1499,14 @@ export class Game {
           ptr.lastTip = tip.clone();
           if (!ptr.holding) tips.push({ pos: tip, vel });
         }
-        const touch = tip && !ptr.holding ? this.poke(ptr, tip, dt) : null;
+        const touch = tip && !ptr.holding && !ptr.holdingTray ? this.poke(ptr, tip, dt) : null;
+        if (tip && !ptr.holding && !ptr.holdingTray) this.tray?.poke(ptr, tip);
         if (touch) hovered.set(touch.panel, touch.uv);
         tmpM.identity().extractRotation(c.matrixWorld);
         o.setFromMatrixPosition(c.matrixWorld); d.set(0, 0, -1).applyMatrix4(tmpM);
         const hit = touch || ptr.holding ? null : this.castFrom(o, d);
         ptr.hit = hit;
-        const useful = hit && ['panel', 'chest', 'grab', 'touch'].includes(hit.type) && (hit.type !== 'grab' || hit.distance < 3.2);
+        const useful = hit && ['panel', 'chest', 'grab', 'touch', 'tray'].includes(hit.type) && (hit.type !== 'grab' || hit.distance < 3.2);
         if (useful && hit.type === 'panel') hovered.set(hit.panel, hit.uv);
         ptr.ray.visible = !!useful; if (useful) ptr.ray.scale.z = hit.distance;
         ptr.dot.visible = !!useful; if (useful) ptr.dot.position.copy(hit.point);
@@ -1503,6 +1549,10 @@ export class Game {
       if (!pose || !this.calibrateXR(pose)) return;
     }
     if (xr) { this.rig.updateMatrixWorld(true); this.renderer.xr.updateCamera(this.camera); }
+    if (this.centerPrompt && this.centerSign) {
+      const hp = this.headPos(), fwd = new THREE.Vector3(); this.camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
+      this.centerSign.position.copy(hp).addScaledVector(fwd, 0.9); this.centerSign.lookAt(hp);
+    }
     if (!xr) {
       const f = (this.keys.has('w') || this.keys.has('arrowup') ? 1 : 0) - (this.keys.has('s') || this.keys.has('arrowdown') ? 1 : 0);
       const s = (this.keys.has('d') ? 1 : 0) - (this.keys.has('a') ? 1 : 0);
@@ -1547,6 +1597,7 @@ export class Game {
     const tips = this.extraTips.splice(0);
     this.updatePointers(dt, tips);
     this.props.update(dt, t, head, tips);
+    if (this.tray) { this.tray.place(this.level, fy(this.level), this.W, this.D, this.panelH); this.tray.updateHeld(); }
     const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(headQ), up = new THREE.Vector3(0, 1, 0).applyQuaternion(headQ);
     this.audio.setListener(head, fwd, up);
     this.ambience(dt, t, head);
