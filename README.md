@@ -41,6 +41,16 @@ After that, she opens the Browser, taps her bookmark, and taps **Enter the Castl
 - **Choose your hero** shows a live preview. There are six hero classes (Adventurer, Princess, Knight, Wizard, Fairy, Explorer) and an outfit colour. A family member keeps her own face, hair, glasses and beard in every costume.
 - **Grown-up settings** (collapsed) holds the name, the maths grade, hair and skin for custom players, family names, modules, homework, problems per lock, play area and music. Grade is separate from the look: choosing a family member's look never changes the grade, and grown-ups must pick one.
 
+## The Magic Scroll (scratch paper)
+
+A parchment scroll hangs to the left of every Magic Lock so she can write out her steps, for example lining up 245 + 367 to add in columns. The top shows the current problem. She can write three ways:
+
+- a fingertip touching the parchment (hand tracking);
+- the magic-wand tip (controllers), or pointing and holding the trigger;
+- holding the mouse button on desktop.
+
+**Wipe** clears the page, and the three dots switch the ink between blue, red and green. Each new problem starts a fresh page. The scroll is only scratch paper: the answer still goes into the panel.
+
 ## Hands-on maths: the gem tray
 
 Some problems come with a slanted gem tray beside the Magic Lock:
@@ -110,6 +120,7 @@ Desktop and simulated XR tests do not establish Quest frame rate, stereo mirror 
 - `js/props.js`: grab-and-throw physics, mini-games, creatures
 - `js/avatar.js`: family looks, hero avatars and setup preview
 - `js/tray.js`: the hands-on gem tray
+- `js/scroll.js`: the Magic Scroll scratch paper
 - `assets/title.jpg`: setup-page illustration
 - `tests/`: `npm test` covers answer checking and 15,600 generated problems. `npm run test:browser:files` runs the full desktop and simulated-VR regression in Chrome, serving files from disk.
 - `js/audio.js`: procedural music, cues and 3D sound effects

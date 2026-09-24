@@ -11,6 +11,7 @@ import { AudioEngine, FLOOR_MOODS } from './audio.js';
 import { buildAvatar, AvatarRig, MIRROR_LAYER } from './avatar.js';
 import { Props } from './props.js';
 import { GemTray } from './tray.js';
+import { MagicScroll } from './scroll.js';
 
 // ------------------------------------------------------------ layout
 const FH = 3.6, SLAB = 0.4, CEIL = FH - SLAB, WALL_T = 0.3, HATCH = 1.2;
@@ -650,6 +651,7 @@ export class Game {
     this.placeLights();
 
     this.tray = new GemTray(this); world.add(this.tray.group);
+    this.scroll = new MagicScroll(this); world.add(this.scroll.group);
     this.tray.place(0, 0, W, D, this.panelH);
     for (let i = 0; i < TOP; i++) this.makeLock(i);
     for (let i = 0; i < TOP; i++) this.makeChest(i);
@@ -850,8 +852,8 @@ export class Game {
     const { stoneDark, wood, woodDark, iron, gold, red, flame, Std } = this.mats, y0 = fy(i), hw = W / 2, hd = D / 2;
     if (i === 0) {
       const leaf = Std({ color: 0x2f7d32 }), blue = Std({ color: 0x2a5bd7 }), white = Std({ color: 0xf2f2f2 }), pot = Std({ color: 0xb5653a, roughness: 0.8 });
-      for (const sx of [-1]) { // the right-hand corner holds the maths tray
-        const x = sx * (hw - 0.3), z = -hd + 0.25;
+      for (const sx of [-1]) { // corners by the lock hold the tray and scroll; flowers go south-west
+        const x = sx * (hw - 0.3), z = hd - 0.3;
         S.add(new THREE.CylinderGeometry(0.2, 0.15, 0.35, 16), pot, [x, 0.175, z]);
         for (let k = 0; k < 9; k++) {
           const a = k * 2.4, rr = 0.03 + (k % 3) * 0.05, px = x + Math.cos(a) * rr, pz = z + Math.sin(a) * rr, h = 0.25 + Math.random() * 0.2;
@@ -894,7 +896,7 @@ export class Game {
     }
     if (i === 3) {
       const steel = Std({ color: 0x9aa0ad, metalness: 0.85, roughness: 0.35 });
-      for (const sx of [-1]) { // right-hand corner is kept clear for the maths tray
+      for (const sx of []) { // both corners by the lock are kept clear for the tray and scroll
         const x = sx * (hw - 0.3), z = -hd + 0.3;
         S.box(0.45, 0.1, 0.45, stoneDark, [x, y0 + 0.05, z], [0, 0, 0], 1);
         for (const d of [-0.08, 0.08]) S.add(new THREE.CylinderGeometry(0.055, 0.065, 0.7, 10), steel, [x + d, y0 + 0.45, z]);
@@ -912,7 +914,7 @@ export class Game {
     }
     if (i === 4) {
       const cryA = new THREE.MeshStandardMaterial({ color: 0x8fdcff, emissive: 0x2a6f99, roughness: 0.15, metalness: 0.1 }), cryB = new THREE.MeshStandardMaterial({ color: 0xd49bff, emissive: 0x5c2a8c, roughness: 0.15, metalness: 0.1 });
-      for (const [x, z] of [[-hw + 0.3, -hd + 0.3], [-hw + 0.3, 0.2]]) {
+      for (const [x, z] of [[-hw + 0.3, 0.2]]) {
         for (let k = 0; k < 6; k++) {
           const h = 0.3 + Math.random() * 0.8;
           S.add(new THREE.ConeGeometry(0.08 + Math.random() * 0.05, h, 6), k % 2 ? cryA : cryB, [x + (Math.random() - 0.5) * 0.3, y0 + h / 2, z + (Math.random() - 0.5) * 0.3], [(Math.random() - 0.5) * 0.4, 0, (Math.random() - 0.5) * 0.4]);
@@ -962,7 +964,7 @@ export class Game {
     panel.floor = i; panel.wallMounted = true;
     const orig = panel.update.bind(panel);
     panel.update = () => { orig(); gems.forEach((g, k) => { const on = k < panel.solved; g.material.color.setHex(on ? 0x4dff9a : 0x555566); g.material.emissive.setHex(on ? 0x1f8a4a : 0); }); };
-    panel.onProblem = (p) => this.tray.bind(panel, p);
+    panel.onProblem = (p) => { this.tray.bind(panel, p); this.scroll.setProblem(p.text); };
     this.world.add(panel.mesh); this.panels.push(panel);
     lock.panel = panel; this.locks.push(lock);
   }
@@ -1171,6 +1173,7 @@ export class Game {
     panel.floor = TOP; panel.wallMounted = true;
     this.world.add(panel.mesh); this.panels.push(panel);
     chest.panel = panel;
+    panel.onProblem = (p) => this.scroll.setProblem(p.text);
     this.finalChest = chest;
   }
 
@@ -1319,7 +1322,7 @@ export class Game {
       });
       c.addEventListener('disconnected', () => { ptr.src = null; dot.visible = false; if (ptr.holding) this.drop(ptr); });
       c.addEventListener('selectstart', () => { if (this.centerPrompt) return this.confirmCenter(); if (!this.tryGrab(ptr)) this.select(ptr); else ptr.grabBy = 'select'; });
-      c.addEventListener('selectend', () => { if ((ptr.holding || ptr.holdingTray) && ptr.grabBy === 'select') this.drop(ptr); });
+      c.addEventListener('selectend', () => { if (ptr.rayDrawing) { ptr.rayDrawing = false; this.scroll?.lift(ptr); } if ((ptr.holding || ptr.holdingTray) && ptr.grabBy === 'select') this.drop(ptr); });
       c.addEventListener('squeezestart', () => { if (this.tryGrab(ptr)) ptr.grabBy = 'squeeze'; });
       c.addEventListener('squeezeend', () => { if ((ptr.holding || ptr.holdingTray) && ptr.grabBy === 'squeeze') this.drop(ptr); });
       this.rig.add(c); this.rig.add(grip);
@@ -1334,9 +1337,16 @@ export class Game {
     this.deskHolder = new THREE.Object3D(); this.deskHolder.position.set(0.16, -0.2, -0.45); this.camera.add(this.deskHolder);
     this.desktopPtr = { desktop: true, hit: null, holding: null };
     const canvas = this.renderer.domElement;
+    canvas.addEventListener('mousedown', (e) => {
+      if (this.renderer.xr.isPresenting || document.pointerLockElement !== canvas || e.button !== 0) return;
+      const h = this.desktopPtr.hit;
+      if (h?.type === 'scroll') { this.desktopPtr.rayDrawing = true; this.skipClick = true; this.scroll.rayDraw(this.desktopPtr, h.uv); }
+    });
+    document.addEventListener('mouseup', () => { if (this.desktopPtr.rayDrawing) { this.desktopPtr.rayDrawing = false; this.scroll?.lift(this.desktopPtr); } });
     canvas.addEventListener('click', () => {
       this.audio.resume();
       if (this.renderer.xr.isPresenting) return;
+      if (this.skipClick) { this.skipClick = false; return; }
       if (document.pointerLockElement !== canvas) canvas.requestPointerLock?.();
       else this.desktopClick();
     });
@@ -1427,6 +1437,7 @@ export class Game {
     for (const p of this.panels) if (p.mesh.visible) targets.push(p.mesh);
     for (const ch of this.chests) if (!ch.opened && !ch.big) ch.group.traverse((o) => { if (o.isMesh && o.userData.chest) targets.push(o); });
     if (this.tray) targets.push(...this.tray.pickables());
+    if (this.scroll?.active()) targets.push(this.scroll.mesh);
     if (this.props) {
       for (const b of this.props.bodies) if (!b.held && !b.worn) b.mesh.traverse((o) => { if (o.isMesh) targets.push(o); });
       for (const c of [this.props.cat?.group, this.props.owl?.group]) c?.traverse((o) => { if (o.isMesh) { o.userData.touchable = true; targets.push(o); } });
@@ -1436,6 +1447,7 @@ export class Game {
     const o = hit.object;
     if (o.userData.panel) return { type: 'panel', panel: o.userData.panel, uv: hit.uv, point: hit.point, distance: hit.distance };
     if (o.userData.chest) return { type: 'chest', chest: o.userData.chest, point: hit.point, distance: hit.distance };
+    if (o.userData.scroll) return { type: 'scroll', uv: hit.uv, point: hit.point, distance: hit.distance };
     if (o.userData.traySlot !== undefined) return { type: 'tray', slot: o.userData.traySlot, point: hit.point, distance: hit.distance };
     if (o.userData.grabBody) return { type: 'grab', body: o.userData.grabBody, point: hit.point, distance: hit.distance };
     if (o.userData.touchable) return { type: 'touch', point: hit.point, distance: hit.distance };
@@ -1449,6 +1461,7 @@ export class Game {
     if (h.type === 'panel') h.panel.press(h.uv);
     else if (h.type === 'chest') this.openChestPanel(h.chest);
     else if (h.type === 'tray') this.tray.clickSlot(h.slot);
+    else if (h.type === 'scroll') { ptr.rayDrawing = true; this.scroll.rayDraw(ptr, h.uv); }
     else if (h.type === 'touch') this.extraTips.push({ pos: h.point.clone(), vel: new THREE.Vector3(0, 0, -1) });
   }
 
@@ -1500,13 +1513,14 @@ export class Game {
           if (!ptr.holding) tips.push({ pos: tip, vel });
         }
         const touch = tip && !ptr.holding && !ptr.holdingTray ? this.poke(ptr, tip, dt) : null;
-        if (tip && !ptr.holding && !ptr.holdingTray) this.tray?.poke(ptr, tip);
+        if (tip && !ptr.holding && !ptr.holdingTray) { this.tray?.poke(ptr, tip); this.scroll?.touch(ptr, tip); }
         if (touch) hovered.set(touch.panel, touch.uv);
         tmpM.identity().extractRotation(c.matrixWorld);
         o.setFromMatrixPosition(c.matrixWorld); d.set(0, 0, -1).applyMatrix4(tmpM);
         const hit = touch || ptr.holding ? null : this.castFrom(o, d);
         ptr.hit = hit;
-        const useful = hit && ['panel', 'chest', 'grab', 'touch', 'tray'].includes(hit.type) && (hit.type !== 'grab' || hit.distance < 3.2);
+        if (ptr.rayDrawing) { if (hit?.type === 'scroll') this.scroll.rayDraw(ptr, hit.uv); else this.scroll.lift(ptr); }
+        const useful = hit && ['panel', 'chest', 'grab', 'touch', 'tray', 'scroll'].includes(hit.type) && (hit.type !== 'grab' || hit.distance < 3.2);
         if (useful && hit.type === 'panel') hovered.set(hit.panel, hit.uv);
         ptr.ray.visible = !!useful; if (useful) ptr.ray.scale.z = hit.distance;
         ptr.dot.visible = !!useful; if (useful) ptr.dot.position.copy(hit.point);
@@ -1519,6 +1533,7 @@ export class Game {
       this.camera.getWorldPosition(o); this.camera.getWorldDirection(d);
       this.desktopPtr.hit = this.desktopPtr.holding ? null : this.castFrom(o, d);
       const h = this.desktopPtr.hit;
+      if (this.desktopPtr.rayDrawing) { if (h?.type === 'scroll') this.scroll.rayDraw(this.desktopPtr, h.uv); else this.scroll.lift(this.desktopPtr); }
       if (h?.type === 'panel') hovered.set(h.panel, h.uv);
       document.getElementById('crosshair')?.classList.toggle('active', !!h && h.type !== 'block');
     }
@@ -1598,6 +1613,7 @@ export class Game {
     this.updatePointers(dt, tips);
     this.props.update(dt, t, head, tips);
     if (this.tray) { this.tray.place(this.level, fy(this.level), this.W, this.D, this.panelH); this.tray.updateHeld(); }
+    if (this.scroll) { this.scroll.place(this.level, fy(this.level), this.W, this.D, this.panelH); this.scroll.update(dt); }
     const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(headQ), up = new THREE.Vector3(0, 1, 0).applyQuaternion(headQ);
     this.audio.setListener(head, fwd, up);
     this.ambience(dt, t, head);
