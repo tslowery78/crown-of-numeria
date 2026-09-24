@@ -1293,8 +1293,27 @@ export class Game {
       secs: Math.round((performance.now() - (panel.shownAt || performance.now())) / 1000), hw: !!p.homework, floor: this.level + 1,
       work: onScroll && this.scroll.used ? this.scroll.snapshot() : null,
     });
+    // her scroll working goes into the answer booklet automatically
+    if (onScroll && this.scroll.used) this.saveBookletPage({ answer: panel.tries?.[panel.tries.length - 1] ?? '', ok, final: true });
     if (p.hwi !== undefined && !this.session.hwDone.includes(p.hwi)) this.session.hwDone.push(p.hwi);
     this.saveSession(); this.saveCheckpoint();
+  }
+  // Answer-booklet pages: vector ink + problem, printed as small inserts from Grown-up settings.
+  keepPage() {
+    if (!this.scroll?.used) return false;
+    this.saveBookletPage({});
+    this.audio.cueScore();
+    this.floatText('Kept for your answer booklet!', this.scroll.group.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, 0.45, 0.1)), '#9dffbe', 2.2);
+    return true;
+  }
+  saveBookletPage({ answer = '', ok = null, final = false }) {
+    const key = `mathcastle.booklet.${this.playerKey}`, problem = this.scroll.problemText;
+    let all; try { all = JSON.parse(localStorage.getItem(key)) || []; } catch { all = []; }
+    // one page per problem per climb: a finished problem updates the page she kept earlier
+    const prev = all.find((pg) => pg.session === this.session.id && pg.problem === problem);
+    const page = { id: prev?.id || `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, at: Date.now(), session: this.session.id, name: this.opts.name || 'Explorer', grade: this.opts.grade, problem, ink: this.scroll.inkData(), answer: final ? answer : prev?.answer || '', ok: final ? ok : prev?.ok ?? null };
+    all = [page, ...all.filter((pg) => pg.id !== page.id)].slice(0, 60);
+    for (let k = 0; k < 3; k++) { try { localStorage.setItem(key, JSON.stringify(all)); return; } catch { all = all.slice(0, Math.floor(all.length / 2)); } }
   }
   loadSessionProblems(id) {
     try { return (JSON.parse(localStorage.getItem(`mathcastle.sessions.${this.playerKey}`)) || []).find((s) => s.id === id)?.problems || []; } catch { return []; }

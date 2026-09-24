@@ -43,6 +43,25 @@
   #report img { width: 150px; border-radius: 6px; background: #f7ecd0; }
   #report .bad { color: #ffb3b3; text-decoration: line-through; } #report .ok { color: #9dffbe; }
   #report h3 { color: #ffe9a8; margin: 14px 0 2px; font-size: 16px; }
+  /* answer-booklet inserts */
+  #booklet { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+  .pagePick { background: #fff; border-radius: 8px; padding: 4px; color: #222; }
+  .pagePick .pickRow { display: flex; justify-content: space-between; align-items: center; font-size: 13px; padding: 0 2px 4px; }
+  .pagePick .pickRow input { width: 20px; height: 20px; vertical-align: middle; }
+  .pagePick .rm { border: 0; background: #eee; border-radius: 10px; cursor: pointer; padding: 2px 8px; }
+  .insert { box-sizing: border-box; border: 1px dashed #777; background: #fff; color: #111; font-family: system-ui, sans-serif; padding: 0.07in 0.1in; display: flex; flex-direction: column; overflow: hidden; }
+  .insert .meta { font-size: 6.5pt; color: #666; display: flex; justify-content: space-between; }
+  .insert .q { font-size: 8.5pt; font-weight: bold; line-height: 1.15; margin: 1pt 0 2pt; }
+  .insert svg { flex: 1; min-height: 0; width: 100%; }
+  .insert .ans { font-size: 8.5pt; border-top: 0.5pt solid #bbb; padding-top: 1pt; }
+  #printArea { display: none; }
+  @media print {
+    @page { margin: 0.4in; }
+    html, body { background: #fff !important; overflow: visible !important; height: auto !important; }
+    body > *:not(#printArea) { display: none !important; }
+    #printArea { display: flex !important; flex-wrap: wrap; gap: 0.1in; }
+    .insert { break-inside: avoid; }
+  }
   #crosshair.active { border-color: #ffe066; background: rgba(255,224,102,0.5); }
   .avatarBox { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start; }
   #avPreview { width: 200px; height: 280px; border-radius: 16px; background: radial-gradient(circle at 50% 30%, #4a3480, #1a1030); flex: none; }
@@ -142,6 +161,16 @@
   </section>
 
   <section>
+    <h2>Answer-booklet inserts</h2>
+    <p class="note">Her Magic Scroll working is kept automatically for each finished problem (she can also press <b>Keep page</b> on the scroll). Tick the pages you want, pick a size and print. Each insert shows her name, the date, the problem, her working and her answer. Cut along the dashed lines and paste them into the answer booklet.</p>
+    <label>Insert size <select id="insertSize"><option value="s">Small: 2½ × 2 in</option><option value="m" selected>Medium: 3¼ × 2½ in</option><option value="l">Large: 4 × 3 in</option></select></label>
+    <label><input type="checkbox" id="insertBW"> Black ink only</label>
+    <div class="chips"><button class="chip" id="showBooklet">Show her pages</button><button class="chip" id="printBooklet">🖨 Print inserts</button><button class="chip" id="saveBooklet">Save as picture</button></div>
+    <div id="bookletNote" class="note"></div>
+    <div id="booklet"></div>
+  </section>
+
+  <section>
     <h2>Which Bluebonnet math modules?</h2>
     <p class="note">Pick the module(s) you are working on in class. <small class="link" id="allMods">all</small> · <small class="link" id="noMods">none</small></p>
     <div class="mods" id="mods"></div>
@@ -176,6 +205,7 @@
   </details>
 </div></div>
 
+<div id="printArea"></div>
 <div id="hud"></div>
 <div id="crosshair"></div>
 <div id="deskHelp">Click to look around · WASD / arrows to walk · click buttons and chests · stand on the glowing square to ride up · type numbers + Enter · H = hint · R = read aloud · Esc = free mouse</div>
@@ -268,7 +298,7 @@ function loadProfile(name) {
   $('autoRead').checked = s.autoRead ?? s.grade === 2;
   $('perDoor').value = String(s.perDoor || 2); $('roomSize').value = s.roomSize || '2.5';
   setGrade(s.grade, s.moduleIds);
-  renderResume(); $('report').innerHTML = ''; $('missedToHw').style.display = 'none';
+  renderResume(); $('report').innerHTML = ''; $('missedToHw').style.display = 'none'; $('booklet').innerHTML = ''; $('bookletNote').textContent = '';
 }
 function renderProfiles() {
   const names = store.get('mathcastle.profiles', []);
@@ -341,6 +371,98 @@ function renderReport() {
   $('missedToHw').textContent = `Practise the ${missedLines.length} missed one${missedLines.length === 1 ? '' : 's'} next time`;
 }
 $('showReport').onclick = renderReport;
+// ---- answer-booklet inserts (printed small, to paste into an answer booklet)
+const INSERT_SIZES = { s: [2.5, 2], m: [3.25, 2.5], l: [4, 3] };
+const bookletKey = () => `mathcastle.booklet.${($('name').value.trim() || 'Explorer').toLowerCase()}`;
+function inkBox(ink) {
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  for (const q of ink.paths) for (let k = 0; k < q.p.length; k += 2) { x0 = Math.min(x0, q.p[k]); x1 = Math.max(x1, q.p[k]); y0 = Math.min(y0, q.p[k + 1]); y1 = Math.max(y1, q.p[k + 1]); }
+  if (x0 > x1) return null;
+  const pad = 14; return [x0 - pad, y0 - pad, Math.max(40, x1 - x0 + 2 * pad), Math.max(30, y1 - y0 + 2 * pad)];
+}
+// Her strokes as a crisp SVG cropped to the writing (white background, fixed line weight).
+function inkSvg(ink, bw) {
+  const box = inkBox(ink); if (!box) return '<svg></svg>';
+  const col = (c) => (bw ? '#111' : ink.inks[c] || '#111');
+  const parts = ink.paths.map((q) => q.p.length <= 2
+    ? `<circle cx="${q.p[0]}" cy="${q.p[1]}" r="4" fill="${col(q.c)}"/>`
+    : `<path d="M${q.p.slice(0, 2).join(' ')} L${q.p.slice(2).join(' ')}" fill="none" stroke="${col(q.c)}" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>`);
+  return `<svg viewBox="${box.join(' ')}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">${parts.join('')}</svg>`;
+}
+function insertHtml(pg, size, bw) {
+  const [w, h] = INSERT_SIZES[size], d = new Date(pg.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  return `<div class="insert" style="width:${w}in;height:${h}in"><div class="meta"><span>${esc(pg.name)}</span><span>${esc(d)}</span></div><div class="q">${esc(pg.problem)}</div>${inkSvg(pg.ink, bw)}<div class="ans">Answer: <b>${esc(pg.answer || '')}</b></div></div>`;
+}
+function bookletPages() { return store.get(bookletKey(), []).filter((pg) => pg.ink && inkBox(pg.ink)); }
+function renderBooklet() {
+  const pages = bookletPages(), size = $('insertSize').value, bw = $('insertBW').checked;
+  const latest = pages[0]?.session;
+  const prevSel = new Set([...document.querySelectorAll('#booklet input:checked')].map((i) => i.value));
+  $('booklet').innerHTML = pages.map((pg) => `<div class="pagePick"><div class="pickRow"><label><input type="checkbox" value="${esc(pg.id)}" ${(prevSel.size ? prevSel.has(pg.id) : pg.session === latest) ? 'checked' : ''}> Print</label><button class="rm" data-id="${esc(pg.id)}" title="remove this page">Remove</button></div>${insertHtml(pg, size, bw)}</div>`).join('');
+  $('bookletNote').textContent = pages.length ? `${pages.length} page${pages.length === 1 ? '' : 's'} kept. The pages from her latest climb are ticked.` : 'No scroll pages yet: they appear here after she writes her working on the Magic Scroll.';
+  document.querySelectorAll('#booklet .rm').forEach((b) => (b.onclick = () => { store.set(bookletKey(), store.get(bookletKey(), []).filter((pg) => pg.id !== b.dataset.id)); renderBooklet(); }));
+}
+function selectedPages() { const ids = new Set([...document.querySelectorAll('#booklet input:checked')].map((i) => i.value)); return bookletPages().filter((pg) => ids.has(pg.id)); }
+$('showBooklet').onclick = renderBooklet;
+$('insertSize').onchange = () => { if ($('booklet').children.length) renderBooklet(); };
+$('insertBW').onchange = $('insertSize').onchange;
+$('printBooklet').onclick = () => {
+  if (!$('booklet').children.length) renderBooklet();
+  const pages = selectedPages();
+  if (!pages.length) { $('bookletNote').textContent = 'Tick at least one page to print.'; return; }
+  $('printArea').innerHTML = pages.map((pg) => insertHtml(pg, $('insertSize').value, $('insertBW').checked)).join('');
+  window.print();
+};
+// Fallback when this device can't print: one sheet image (inserts at true size, 200 dpi) to share or save.
+// Same insert as the printed card, drawn straight onto a canvas (pt = dpi/72 px).
+function drawInsert(c, pg, x, y, w, h, dpi, bw) {
+  const pt = dpi / 72, pad = 0.09 * dpi;
+  c.save(); c.fillStyle = '#fff'; c.fillRect(x, y, w, h);
+  c.setLineDash([4 * pt, 3 * pt]); c.strokeStyle = '#777'; c.lineWidth = 0.75 * pt; c.strokeRect(x, y, w, h); c.setLineDash([]);
+  c.fillStyle = '#666'; c.font = `${6.5 * pt}px sans-serif`; c.textBaseline = 'top';
+  c.fillText(pg.name, x + pad, y + pad * 0.8);
+  const d = new Date(pg.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  c.textAlign = 'right'; c.fillText(d, x + w - pad, y + pad * 0.8); c.textAlign = 'left';
+  c.fillStyle = '#111'; c.font = `bold ${8.5 * pt}px sans-serif`;
+  const words = String(pg.problem).split(' '), lines = []; let line = '';
+  for (const wd of words) { const t = line ? line + ' ' + wd : wd; if (c.measureText(t).width > w - 2 * pad && line) { lines.push(line); line = wd; } else line = t; }
+  lines.push(line);
+  let ty = y + pad * 0.8 + 9 * pt; for (const ln of lines.slice(0, 3)) { c.fillText(ln, x + pad, ty); ty += 10 * pt; }
+  const ansH = 12 * pt, top = ty + 2 * pt, bot = y + h - pad - ansH;
+  const box = inkBox(pg.ink);
+  if (box && bot > top) {
+    const s = Math.min((w - 2 * pad) / box[2], (bot - top) / box[3]), ox = x + (w - box[2] * s) / 2, oy = top + (bot - top - box[3] * s) / 2;
+    c.lineWidth = 1.4 * pt; c.lineCap = 'round'; c.lineJoin = 'round';
+    for (const q of pg.ink.paths) {
+      const col = bw ? '#111' : pg.ink.inks[q.c] || '#111'; c.strokeStyle = col; c.fillStyle = col;
+      const X = (k) => ox + (q.p[k] - box[0]) * s, Y = (k) => oy + (q.p[k + 1] - box[1]) * s;
+      if (q.p.length <= 2) { c.beginPath(); c.arc(X(0), Y(0), 1.2 * pt, 0, 7); c.fill(); continue; }
+      c.beginPath(); c.moveTo(X(0), Y(0)); for (let k = 2; k < q.p.length; k += 2) c.lineTo(X(k), Y(k)); c.stroke();
+    }
+  }
+  c.strokeStyle = '#bbb'; c.lineWidth = 0.5 * pt; c.beginPath(); c.moveTo(x + pad, bot + 2 * pt); c.lineTo(x + w - pad, bot + 2 * pt); c.stroke();
+  c.fillStyle = '#111'; c.font = `${8.5 * pt}px sans-serif`; c.fillText('Answer: ', x + pad, bot + 4 * pt);
+  const aw = c.measureText('Answer: ').width; c.font = `bold ${8.5 * pt}px sans-serif`; c.fillText(String(pg.answer || ''), x + pad + aw, bot + 4 * pt);
+  c.restore();
+}
+$('saveBooklet').onclick = async () => {
+  if (!$('booklet').children.length) renderBooklet();
+  const pages = selectedPages();
+  if (!pages.length) { $('bookletNote').textContent = 'Tick at least one page to save.'; return; }
+  const dpi = 200, [wIn, hIn] = INSERT_SIZES[$('insertSize').value], gap = 0.1, cols = Math.max(1, Math.floor((7.5 + gap) / (wIn + gap)));
+  const rows = Math.ceil(pages.length / cols), W = Math.round((cols * (wIn + gap) + gap) * dpi), H = Math.round((rows * (hIn + gap) + gap) * dpi);
+  const cv = document.createElement('canvas'); cv.width = W; cv.height = H; const c = cv.getContext('2d');
+  c.fillStyle = '#fff'; c.fillRect(0, 0, W, H);
+  for (let i = 0; i < pages.length; i++) {
+    const pg = pages[i], x = (gap + (i % cols) * (wIn + gap)) * dpi, y = (gap + Math.floor(i / cols) * (hIn + gap)) * dpi;
+    drawInsert(c, pg, x, y, wIn * dpi, hIn * dpi, dpi, $('insertBW').checked);
+  }
+  const blob = await new Promise((r) => cv.toBlob(r, 'image/png'));
+  const file = new File([blob], `numeria-inserts-${($('name').value.trim() || 'explorer').toLowerCase()}.png`, { type: 'image/png' });
+  if (navigator.canShare?.({ files: [file] })) { try { await navigator.share({ files: [file], title: 'Answer-booklet inserts' }); return; } catch { /* fall back to download */ } }
+  const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = file.name; a.click();
+  $('bookletNote').textContent = 'Saved the inserts as a picture: print it at 100% size to keep the inserts the right size.';
+};
 $('missedToHw').onclick = () => {
   const cur = $('homework').value.trim();
   const add = missedLines.filter((l) => !cur.includes(l));

@@ -61,9 +61,11 @@ export class MagicScroll {
     c.fillText(t === this.problemText ? t : `${t}…`, 22, 58);
     c.strokeStyle = 'rgba(107,63,31,0.35)'; c.beginPath(); c.moveTo(16, HEAD + 10); c.lineTo(CW - 16, HEAD + 10); c.stroke();
     this.drawFooter();
-    this.strokes.clear(); this.used = false;
+    this.strokes.clear(); this.used = false; this.paths = []; this.kept = false;
     this.dirty = true;
   }
+  // Her pen strokes as compact vectors (canvas pixels), for printing booklet inserts.
+  inkData() { return { w: CW, h: CH, top: HEAD + 14, bottom: CH - FOOT, inks: INKS, paths: this.paths.map((q) => ({ c: q.c, p: q.p.slice() })) }; }
   // Small JPEG of her work for the grown-up report.
   snapshot() {
     const c = document.createElement('canvas'); c.width = 256; c.height = Math.round(256 * CH / CW);
@@ -73,8 +75,10 @@ export class MagicScroll {
   drawFooter() {
     const c = this.ctx, y = CH - FOOT;
     c.fillStyle = '#e3cf9c'; c.fillRect(0, y, CW, FOOT);
-    c.fillStyle = '#8a4b2a'; this.roundRect(20, y + 12, 170, FOOT - 24, 16); c.fill();
-    c.fillStyle = '#fff'; c.font = 'bold 30px system-ui, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('Wipe', 105, y + FOOT / 2 + 1);
+    c.fillStyle = '#8a4b2a'; this.roundRect(20, y + 12, 150, FOOT - 24, 16); c.fill();
+    c.fillStyle = '#fff'; c.font = 'bold 30px system-ui, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('Wipe', 95, y + FOOT / 2 + 1);
+    c.fillStyle = this.kept ? '#2f8a4a' : '#6a3fa0'; this.roundRect(186, y + 12, 250, FOOT - 24, 16); c.fill();
+    c.fillStyle = '#fff'; c.fillText(this.kept ? 'Kept ✓' : 'Keep page', 311, y + FOOT / 2 + 1);
     INKS.forEach((col, k) => {
       const x = CW - 60 - k * 70;
       c.beginPath(); c.arc(x, y + FOOT / 2, 22, 0, 7); c.fillStyle = col; c.fill();
@@ -85,7 +89,8 @@ export class MagicScroll {
   roundRect(x, y, w, h, r) { this.ctx.beginPath(); this.ctx.roundRect(x, y, w, h, r); }
   button(px, py) {
     if (py < CH - FOOT) return null;
-    if (px >= 20 && px <= 190) return 'wipe';
+    if (px >= 20 && px <= 170) return 'wipe';
+    if (px >= 186 && px <= 436) return 'keep';
     for (let k = 0; k < INKS.length; k++) if (Math.hypot(px - (CW - 60 - k * 70), py - (CH - FOOT / 2)) < 30) return `ink${k}`;
     return 'none';
   }
@@ -93,6 +98,7 @@ export class MagicScroll {
     if (this.btnCool > 0 || !b || b === 'none') return;
     this.btnCool = 0.4;
     if (b === 'wipe') { this.clear(); this.g.audio?.pop(this.group.getWorldPosition(new THREE.Vector3())); }
+    else if (b === 'keep') { if (this.used && this.g.keepPage?.()) { this.kept = true; this.drawFooter(); this.dirty = true; } }
     else { this.ink = Number(b.slice(3)); this.drawFooter(); this.dirty = true; this.g.audio?.click(); }
   }
   // Continue (or start) a stroke for `key` at canvas pixel (px, py).
@@ -103,10 +109,12 @@ export class MagicScroll {
     const last = this.strokes.get(key), c = this.ctx;
     c.strokeStyle = INKS[this.ink]; c.fillStyle = INKS[this.ink]; c.lineWidth = 6; c.lineCap = 'round'; c.lineJoin = 'round';
     this.used = true;
-    if (!last) { c.beginPath(); c.arc(px, py, 3, 0, 7); c.fill(); this.strokes.set(key, { x: px, y: py }); this.dirty = true; return; }
+    if (this.kept) { this.kept = false; this.drawFooter(); } // changed since it was kept
+    if (!last) { c.beginPath(); c.arc(px, py, 3, 0, 7); c.fill(); const path = { c: this.ink, p: [Math.round(px), Math.round(py)] }; this.paths.push(path); this.strokes.set(key, { x: px, y: py, path }); this.dirty = true; return; }
     if (Math.hypot(px - last.x, py - last.y) < 1.5) return; // ignore hand-tracking jitter
     c.beginPath(); c.moveTo(last.x, last.y); c.lineTo(px, py); c.stroke();
-    this.strokes.set(key, { x: px, y: py }); this.dirty = true;
+    last.path.p.push(Math.round(px), Math.round(py));
+    this.strokes.set(key, { x: px, y: py, path: last.path }); this.dirty = true;
   }
   lift(key) { this.strokes.delete(key); }
   uvToPx(uv) { return [uv.x * CW, (1 - uv.y) * CH]; }

@@ -63,6 +63,14 @@ A parchment scroll hangs to the left of every Magic Lock so she can write out he
 
 **Wipe** clears the page, and the three dots switch the ink between blue, red and green. Each new problem starts a fresh page. The scroll is only scratch paper: the answer still goes into the panel.
 
+## Printing her work: answer-booklet inserts
+
+When she finishes a problem, the working she wrote on the Magic Scroll is kept for printing. She can also press **Keep page** on the scroll part-way through. Her pen strokes are saved as lines rather than a picture (under 1 KB a page), so they print crisp at any size, cropped to the writing and on a white background.
+
+To print, open **Grown-up settings → Answer-booklet inserts → Show her pages** and tick the pages you want. Choose **Small** (2½ × 2 in), **Medium** (3¼ × 2½ in) or **Large** (4 × 3 in), optionally **Black ink only**, and press **Print inserts**. Each insert has dashed cut lines, her name, the date, the problem, her working and her answer. Several fit on one sheet.
+
+Pages are stored on the device she plays on. If that device can't print, **Save as picture** makes one image of the selected inserts at true size (200 dpi). It shares or downloads the image, depending on the device. Print it at 100% scale.
+
 ## Hands-on maths: the gem tray
 
 Some problems come with a slanted gem tray beside the Magic Lock:
