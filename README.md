@@ -1,16 +1,24 @@
-# Math Castle Quest (Meta Quest 3)
+# Crown of Numeria (Meta Quest 3)
 
-A WebXR castle game that runs in the Quest 3 browser, so there's nothing to install or sideload. There are six rooms (Entrance Hall, Great Hall, Royal Library, Knights' Armory, Crystal Tower, Throne Room). Every door has a magic lock that opens after the player solves math problems. Each room also has a treasure chest that opens with one more problem. Solving the final problems in the Throne Room wins the Royal Crown.
+Crown of Numeria is a WebXR math castle that runs in the Quest 3 browser, so there's nothing to install or sideload. There are six rooms (Entrance Hall, Great Hall, Royal Library, Knights' Armory, Crystal Tower, Throne Room). Every door has a magic lock that opens after the player solves math problems. Each room also has a treasure chest that opens with one more problem. Solving the final problems in the Throne Room wins the Crown of Numeria.
 
 Problems are generated for **Bluebonnet Learning Grade 2 (Modules 1–8)** and **Grade 4 (Modules 1–7)**, following the modules in TEA's scope and sequence. On the setup screen you can also type in the actual homework problems, and those come first.
 
-## Play it on the Quest (home Wi-Fi)
+## Launch on the Quest
 
-1. On the Mac, in this folder: `./serve.sh`. It prints an address like `https://192.168.4.222:8443`.
-2. In the Quest browser, open that address. You'll see a certificate warning the first time. Tap **Advanced → Proceed**. This is expected because the certificate is self-made.
-3. Choose the player's name and grade, tick the module(s) she's on, then tap **Enter the Castle in VR**.
+The game is hosted at **https://tslowery78.github.io/crown-of-numeria/**
 
-The Quest and the Mac need to be on the same Wi-Fi network. WebXR only works over https, which is why the server uses https.
+Set it up once for each player: in the Quest browser, open that player's link and bookmark it (⋮ → Bookmark). Change the names below to the girls' names.
+
+- `https://tslowery78.github.io/crown-of-numeria/?player=Ava&grade=2`
+- `https://tslowery78.github.io/crown-of-numeria/?player=Lily&grade=4`
+
+After that, she opens the Browser, taps her bookmark, and taps **Enter the Castle in VR**. Her progress, module choices and homework are saved on the headset under her name. Tap "change settings or add homework" to edit them.
+
+To publish changes: `git commit` and `git push`, and GitHub Pages updates within about a minute.
+
+### Offline or local option
+Run `./serve.sh` on the Mac and open the https://<ip>:8443 address it prints. You'll need to accept a certificate warning once.
 
 ## Controls
 
