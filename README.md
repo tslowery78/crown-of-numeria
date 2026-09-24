@@ -86,6 +86,12 @@ To publish changes: `git commit` and `git push`, and GitHub Pages updates within
 ### Offline or local option
 Run `./serve.sh` on the Mac and open the https://<ip>:8443 address it prints. You'll need to accept a certificate warning once.
 
+## Safety: the real-world boundary
+
+The Quest draws its own boundary (Guardian) over every immersive app, and this game is included. The game asks for ordinary room-scale space and never "unbounded" space, so the boundary grid and passthrough appear as usual when she gets near the edge of the play area. Keep the boundary turned on and set up for room-scale.
+
+The game adds a backup of its own. The castle room is sized to fit inside the clear space, so walking through a castle wall means she is heading for the real edge. When that happens the view dims, a "Too close to the edge! Step back into the castle" sign appears, a low tone plays and the controllers buzz. It clears as soon as she steps back in.
+
 ## Room setup
 
 1. Clear the space and set a **room-scale** Guardian. A stationary boundary won't work because she needs to walk around.

@@ -1061,6 +1061,30 @@ export class Game {
     }
   }
 
+  // Safety backup for the Quest's own boundary: the castle room sits inside the
+  // real clear space, so walking through a castle wall means she is heading for
+  // the real edge. Dim the view, show a sign and buzz the controllers.
+  updateEdgeWarning(dt) {
+    if (!this.world) return;
+    if (!this.edgeVeil) {
+      this.edgeVeil = new THREE.Mesh(new THREE.SphereGeometry(0.25, 16, 12), new THREE.MeshBasicMaterial({ color: 0x0b0716, transparent: true, opacity: 0, side: THREE.BackSide, depthTest: false, depthWrite: false, fog: false, toneMapped: false }));
+      this.edgeVeil.renderOrder = 998; this.edgeVeil.visible = false; this.camera.add(this.edgeVeil);
+      this.edgeSign = makeSign('Too close to the edge! Step back into the castle.', { w: 0.34, h: 0.1, size: 70, bg: '#3a0f1a', border: '#ff8a8a', fg: '#ffffff' });
+      this.edgeSign.material.depthTest = false; this.edgeSign.renderOrder = 999; this.edgeSign.position.set(0, -0.02, -0.22); this.edgeSign.visible = false; this.camera.add(this.edgeSign);
+      this.edgeBuzz = 0;
+    }
+    const head = this.headPos(), m = 0.12;
+    const out = Math.max(Math.abs(head.x) - (this.W / 2 - m), Math.abs(head.z) - (this.D / 2 - m), 0);
+    const a = clamp(out / 0.3, 0, 0.88);
+    this.edgeLevel = a;
+    this.edgeVeil.visible = a > 0.01; this.edgeVeil.material.opacity = a;
+    const warn = a > 0.3;
+    if (warn && !this.edgeSign.visible) this.audio.tone(196, 0, 0.5, { type: 'triangle', vol: 0.12 });
+    this.edgeSign.visible = warn;
+    this.edgeBuzz -= dt;
+    if (warn && this.edgeBuzz <= 0) { this.edgeBuzz = 0.6; for (const ptr of this.pointers) this.haptic(ptr, 0.5, 80); }
+  }
+
   // Optional automatic read-aloud (default on for 2nd grade), after arrival cues settle.
   readAloud(p, delay = 0.3) {
     if (!p || !this.opts.autoRead) return;
@@ -1659,6 +1683,7 @@ export class Game {
       if (!pose || !this.calibrateXR(pose)) return;
     }
     if (xr) { this.rig.updateMatrixWorld(true); this.renderer.xr.updateCamera(this.camera); }
+    this.updateEdgeWarning(dt);
     if (this.centerPrompt && this.centerSign) {
       const hp = this.headPos(), fwd = new THREE.Vector3(); this.camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
       this.centerSign.position.copy(hp).addScaledVector(fwd, 0.9); this.centerSign.lookAt(hp);
