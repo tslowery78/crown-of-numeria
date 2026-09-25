@@ -3,15 +3,16 @@
 // to the real play area. Solving a floor's Magic Lock opens the ceiling hatch;
 // standing on the magic square lifts the player up to the next floor.
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/addons/BufferGeometryUtils.js';
-import { Reflector } from 'three/addons/Reflector.js';
-import { RoomEnvironment } from 'three/addons/RoomEnvironment.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { Reflector } from 'three/addons/objects/Reflector.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { ProblemSource, isCorrect, speakable } from './problems.js';
 import { AudioEngine, FLOOR_MOODS } from './audio.js';
 import { buildAvatar, AvatarRig, MIRROR_LAYER } from './avatar.js';
 import { Props } from './props.js';
 import { GemTray } from './tray.js';
 import { MagicScroll } from './scroll.js';
+import { loadAssets } from './assets.js';
 
 // ------------------------------------------------------------ layout
 const FH = 3.6, SLAB = 0.4, CEIL = FH - SLAB, WALL_T = 0.3, HATCH = 1.2;
@@ -26,6 +27,8 @@ const FLOORS = [
 ];
 const TOP = FLOORS.length - 1;
 const fy = (i) => i * FH;
+// window centres along a wall of length `len` (metres from the wall's middle)
+export const windowSpots = (len) => (len >= 4.6 ? [-len / 4, len / 4] : [0]);
 const ROOM_MIN = 1.6, ROOM_MAX = 8, EDGE_MARGIN = 0.15;
 const ROOM_KEY = 'mathcastle.room.v1'; // measured room, stored in the Guardian-anchored space
 const TREASURES = [
@@ -406,13 +409,16 @@ export class Game {
     this.clock = new THREE.Clock();
     this.anims = []; this.particles = []; this.extraTips = [];
     this.initRenderer();
+    this.assets = null;
+    this.assetsReady = loadAssets().then((a) => (this.assets = a));
     this.initControls();
     this.renderer.setAnimationLoop((time, frame) => this.frame(frame));
   }
 
   presetSize() { const n = parseFloat(this.opts.roomSize); return Number.isFinite(n) ? n : this.opts.roomSize === 'room' ? 3.5 : 2.5; }
 
-  startDesktop() {
+  async startDesktop() {
+    await this.assetsReady;
     const s = this.presetSize();
     this.buildWorld(s, s);
     this.startAudio();
@@ -423,6 +429,7 @@ export class Game {
     const session = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking'] });
     this.xrBoundsSpace = null; this.xrReset = false;
     try {
+      await this.assetsReady;
       let type = 'local-floor', w = this.presetSize(), d = w, cx = 0, cz = 0, frame = null;
       this.roomMode = this.opts.roomSize === 'room';
       if (this.roomMode) {
@@ -588,7 +595,7 @@ export class Game {
   }
   finishMeasure(m, W, D, center, fwd) {
     this.scene.remove(this.measureGroup); if (this.measureSign) this.scene.remove(this.measureSign);
-    this.scene.background = new THREE.Color(0xbfe3ff);
+    this.scene.background = this.skyBackground();
     if (m.type === 'bounded-floor') { try { localStorage.setItem(ROOM_KEY, JSON.stringify({ type: m.type, cx: center.x, cz: center.z, fx: fwd.x, fz: fwd.z, w: W, d: D, at: Date.now() })); } catch { /* ignore */ } }
     if (!m.reanchor) { this.fitInfo = { type: m.type, w: W, d: D }; this.buildWorld(W, D); }
     this.world.visible = true;
@@ -654,6 +661,8 @@ export class Game {
     });
   }
 
+  skyBackground() { return this.assets?.sky || new THREE.Color(0xbfe3ff); }
+
   buildWorld(W, D) {
     if (!Number.isFinite(W) || !Number.isFinite(D) || W < ROOM_MIN || D < ROOM_MIN) throw new Error('The play area is too small for the castle.');
     W = Math.min(W, ROOM_MAX); D = Math.min(D, ROOM_MAX);
@@ -666,22 +675,26 @@ export class Game {
     this.stats = { attempts: 0, correct: 0, firstTry: 0, missed: [], treasures: [] };
     this.level = 0; this.lift = { state: 'locked', dwell: 0, t: 0 };
     this.panels = []; this.chests = []; this.locks = []; this.hatches = []; this.blockers = []; this.floaters = [];
-    this.mirrors = []; this.windows = []; this.torches = []; this.spinners = [];
+    this.mirrors = []; this.windows = []; this.torches = []; this.spinners = []; this.decor = [];
     this.panelH = 1.0;
     this.rig.position.set(0, 0, 0);
 
     const S = new StaticBatch(), world = this.world, hw = W / 2, hd = D / 2;
+    this.scene.background = this.skyBackground();
     const Std = (o) => new THREE.MeshStandardMaterial({ roughness: 0.85, ...o });
-    const stoneMaps = surfaceMaps('brick', [206, 180, 140]), darkMaps = surfaceMaps('brick', [168, 146, 116]), tileMaps = surfaceMaps('tile', [222, 206, 178]);
-    const woodMaps = surfaceMaps('wood', [150, 98, 56]), plankMaps = surfaceMaps('wood', [96, 60, 34]);
+    // scanned stone and wood where loaded, otherwise the drawn stand-ins
+    const scan = this.assets?.surfaces || {}, pick = (name, kind, base, rough, tint) => (scan[name] ? { ...scan[name], ...(tint ? { color: tint } : {}) } : { ...surfaceMaps(kind, base), roughness: rough });
+    const stoneMaps = pick('castle_wall_varriation', 'brick', [206, 180, 140], 0.92, 0xfff4e6), darkMaps = pick('castle_wall_varriation', 'brick', [168, 146, 116], 0.92, 0xb8aa98);
+    const tileMaps = pick('monastery_stone_floor', 'tile', [222, 206, 178], 0.9, 0xf2e6d6);
+    const woodMaps = pick('old_wooden_floor_02', 'wood', [150, 98, 56], 0.7), plankMaps = pick('dark_wooden_planks', 'wood', [96, 60, 34], 0.75);
     const mats = this.mats = {
-      stone: Std({ ...stoneMaps, roughness: 0.92 }), stoneDark: Std({ ...darkMaps, roughness: 0.92 }),
-      wood: Std({ ...woodMaps, roughness: 0.7 }), woodDark: Std({ ...plankMaps, roughness: 0.75 }),
+      stone: Std(stoneMaps), stoneDark: Std(darkMaps),
+      wood: Std(woodMaps), woodDark: Std(plankMaps),
       iron: Std({ color: 0x2c2c33, metalness: 0.6, roughness: 0.45 }), gold: Std({ color: 0xd9a627, metalness: 0.85, roughness: 0.3 }), red: Std({ color: 0x9c1b24 }),
       flame: new THREE.MeshBasicMaterial({ color: 0xffa640, toneMapped: false }), Std,
     };
     mats.flame.userData.noBlock = true;
-    const floorMats = { stone: Std({ ...tileMaps, roughness: 0.9 }), wood: Std({ ...surfaceMaps('wood', [165, 110, 64]), roughness: 0.65 }) };
+    const floorMats = { stone: Std(tileMaps), wood: Std(pick('old_wooden_floor_02', 'wood', [165, 110, 64], 0.65, 0xfff0e0)) };
     const plane = (w, h) => tileUV(new THREE.PlaneGeometry(w, h), [w, h], 1.5);
     const ring = (w, d, h) => [
       { x: 0, z: -(h / 2 + (d - h) / 4), w, d: (d - h) / 2 }, { x: 0, z: h / 2 + (d - h) / 4, w, d: (d - h) / 2 },
@@ -692,28 +705,33 @@ export class Game {
     shaftMat.userData.noBlock = true;
     const flowerCols = [0xff6fae, 0xffd54a, 0xffffff, 0x9b7bff].map((c) => Std({ color: c, roughness: 0.6 }));
     const leafMat = Std({ color: 0x3f8f3a });
-    // a wall with an optional centred arched window
+    // a wall with arched windows (one in the middle; two on long walls in big rooms)
     const wall = (y0, h, cx, cz, len, alongX, win, inward) => {
       const place = (geo, u, yc) => { const g2 = geo.clone(); if (!alongX) g2.rotateY(Math.PI / 2); S.add(g2, mats.stone, [alongX ? cx + u : cx, y0 + yc, alongX ? cz : cz + u]); };
       const box = (u, yc, l, ph) => place(tileUV(new THREE.BoxGeometry(l, ph, WALL_T), [l, ph, WALL_T], 1.5), u, yc);
       if (!win) return box(0, h / 2, len, h);
-      const ww = WIN.w, side = (len - ww) / 2, archY = WIN.sill + WIN.h;
-      box(-(ww / 2 + side / 2), h / 2, side, h); box(ww / 2 + side / 2, h / 2, side, h);
-      box(0, WIN.sill / 2, ww, WIN.sill);
+      const ww = WIN.w, archY = WIN.sill + WIN.h, spots = windowSpots(len);
+      // solid wall between the openings
+      [-len / 2, ...spots.flatMap((c) => [c - ww / 2, c + ww / 2]), len / 2].reduce((a, b, k) => { if (k % 2) box((a + b) / 2, h / 2, b - a, h); return b; });
       const sh = new THREE.Shape(); sh.moveTo(-ww / 2, h); sh.lineTo(ww / 2, h); sh.lineTo(ww / 2, archY); sh.absarc(0, archY, ww / 2, 0, Math.PI, false); sh.lineTo(-ww / 2, h);
       const arch = new THREE.ExtrudeGeometry(sh, { depth: WALL_T, bevelEnabled: false, curveSegments: 16 }).translate(0, 0, -WALL_T / 2);
       const uv = arch.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) / 1.5, uv.getY(i) / 1.5);
-      place(arch, 0, 0);
-      // sill, flower box outside, light shaft inside
-      const sill = new THREE.BoxGeometry(ww + 0.12, 0.06, WALL_T + 0.16); if (!alongX) sill.rotateY(Math.PI / 2);
-      S.add(sill, mats.stoneDark, [cx, y0 + WIN.sill - 0.03, cz]);
-      const out = inward.clone().multiplyScalar(-1), ox = cx + out.x * (WALL_T / 2 + 0.12), oz = cz + out.z * (WALL_T / 2 + 0.12);
-      const fb = new THREE.BoxGeometry(alongX ? ww : 0.16, 0.14, alongX ? 0.16 : ww); S.add(fb, mats.wood, [ox, y0 + WIN.sill - 0.13, oz]);
-      for (let k = 0; k < 7; k++) { const u = -ww / 2 + 0.08 + k * ((ww - 0.16) / 6), fx = alongX ? ox + u : ox, fz = alongX ? oz : oz + u; S.add(new THREE.SphereGeometry(0.035, 8, 6), leafMat, [fx, y0 + WIN.sill - 0.04, fz]); S.add(new THREE.SphereGeometry(0.03, 8, 6), flowerCols[k % 4], [fx, y0 + WIN.sill + 0.01, fz]); }
-      // warm patch of sunlight on the floor below the window
-      const sp = new THREE.Vector3(cx, y0 + 0.006, cz).addScaledVector(inward, WALL_T / 2 + 0.55);
-      S.add(new THREE.PlaneGeometry(alongX ? ww * 1.1 : 0.9, alongX ? 0.9 : ww * 1.1), shaftMat, [sp.x, sp.y, sp.z], [-Math.PI / 2, 0, 0]);
-      this.windows.push({ pos: new THREE.Vector3(cx, y0 + archY - 0.3, cz), out, y0 });
+      const out = inward.clone().multiplyScalar(-1);
+      for (const c of spots) {
+        const wx = alongX ? cx + c : cx, wz = alongX ? cz : cz + c;
+        box(c, WIN.sill / 2, ww, WIN.sill);
+        place(arch, c, 0);
+        // sill, flower box outside, light shaft inside
+        const sill = new THREE.BoxGeometry(ww + 0.12, 0.06, WALL_T + 0.16); if (!alongX) sill.rotateY(Math.PI / 2);
+        S.add(sill, mats.stoneDark, [wx, y0 + WIN.sill - 0.03, wz]);
+        const ox = wx + out.x * (WALL_T / 2 + 0.12), oz = wz + out.z * (WALL_T / 2 + 0.12);
+        const fb = new THREE.BoxGeometry(alongX ? ww : 0.16, 0.14, alongX ? 0.16 : ww); S.add(fb, mats.wood, [ox, y0 + WIN.sill - 0.13, oz]);
+        for (let k = 0; k < 7; k++) { const u = -ww / 2 + 0.08 + k * ((ww - 0.16) / 6), fx = alongX ? ox + u : ox, fz = alongX ? oz : oz + u; S.add(new THREE.SphereGeometry(0.035, 8, 6), leafMat, [fx, y0 + WIN.sill - 0.04, fz]); S.add(new THREE.SphereGeometry(0.03, 8, 6), flowerCols[k % 4], [fx, y0 + WIN.sill + 0.01, fz]); }
+        // warm patch of sunlight on the floor below the window
+        const sp = new THREE.Vector3(wx, y0 + 0.006, wz).addScaledVector(inward, WALL_T / 2 + 0.55);
+        S.add(new THREE.PlaneGeometry(alongX ? ww * 1.1 : 0.9, alongX ? 0.9 : ww * 1.1), shaftMat, [sp.x, sp.y, sp.z], [-Math.PI / 2, 0, 0]);
+        this.windows.push({ pos: new THREE.Vector3(wx, y0 + archY - 0.3, wz), out, y0 });
+      }
     };
 
     this.buildKingdom(S);
@@ -796,7 +814,7 @@ export class Game {
     this.scene.add(this.avatar.root);
     // props & creatures
     this.props = new Props(this);
-    this.props.build({ W, D, fy, FH, CEIL, FLOORS, TOP });
+    this.props.build({ W, D, fy, FH, CEIL, FLOORS, TOP, winSpots: { S: windowSpots(W + 2 * WALL_T), E: windowSpots(D), W: windowSpots(D) } });
     if (this.opts.resume) this.applyResume(this.opts.resume);
     (this.level >= TOP ? this.finalChest.panel : this.locks[this.level].panel).activate();
     this.updateHud();
@@ -864,17 +882,18 @@ export class Game {
   }
   buildKingdom(S) {
     const Std = (o) => { const m = new THREE.MeshStandardMaterial({ roughness: 0.9, ...o }); m.userData.noBlock = true; return m; };
-    const world = this.world;
+    const world = this.world, scan = this.assets?.surfaces || {}, photoSky = !!this.assets?.sky;
     const sky = new THREE.SphereGeometry(900, 32, 16), col = [], top = new THREE.Color(0x3a7bd5), hor = new THREE.Color(0xdcefff);
     const pos = sky.attributes.position;
     for (let k = 0; k < pos.count; k++) { const t = clamp(pos.getY(k) / 900, 0, 1) ** 0.55; const c = hor.clone().lerp(top, t); col.push(c.r, c.g, c.b); }
     sky.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
     const skyMesh = new THREE.Mesh(sky, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false, toneMapped: false }));
-    skyMesh.renderOrder = -1; world.add(skyMesh);
+    skyMesh.renderOrder = -1; if (!photoSky) world.add(skyMesh);
     const sun = new THREE.Sprite(new THREE.SpriteMaterial({ map: canvasTexture(128, 128, (c, w) => { const g = c.createRadialGradient(64, 64, 4, 64, 64, 64); g.addColorStop(0, 'rgba(255,255,240,1)'); g.addColorStop(0.25, 'rgba(255,245,200,0.9)'); g.addColorStop(1, 'rgba(255,230,160,0)'); c.fillStyle = g; c.fillRect(0, 0, w, w); }), fog: false, depthWrite: false, toneMapped: false }));
-    sun.position.set(-300, 380, -450); sun.scale.setScalar(160); world.add(sun);
+    sun.position.set(-300, 380, -450); sun.scale.setScalar(160); if (!photoSky) world.add(sun);
     world.add(new THREE.HemisphereLight(0xdfefff, 0x6b8a4a, 1.1));
-    const dl = new THREE.DirectionalLight(0xfff1dc, 2.4); dl.position.set(-40, 60, -60); world.add(dl);
+    // the photo sky's sun is at ~48° elevation; light the kingdom from there
+    const dl = new THREE.DirectionalLight(0xfff1dc, 2.4); dl.position.set(...(photoSky ? [56, 74, 36] : [-40, 60, -60])); world.add(dl);
 
     // terrain with painted vertex colours (grass, fields, river banks, road)
     const N = 110, size = 900, tg = new THREE.PlaneGeometry(size, size, N, N).rotateX(-Math.PI / 2), tp = tg.attributes.position, tc = [];
@@ -893,10 +912,10 @@ export class Game {
     const terrain = new THREE.Mesh(tg, Std({ vertexColors: true, roughness: 1 })); terrain.position.y = -0.03; world.add(terrain);
     const water = new THREE.Mesh(new THREE.PlaneGeometry(size, size).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x3f8fd0, roughness: 0.15, metalness: 0.2, transparent: true, opacity: 0.9 }));
     water.position.y = -0.5; world.add(water); this.water = water;
-    const paving = Std({ ...surfaceMaps('tile', [170, 160, 140]) });
+    const paving = Std({ ...(scan.medieval_blocks_02 || surfaceMaps('tile', [170, 160, 140])) });
     S.add(tileUV(new THREE.CircleGeometry(17.6, 48), [35, 35], 2), paving, [0, -0.02, 0], [-Math.PI / 2, 0, 0]);
     // curtain wall with round towers and colourful roofs
-    const wallStone = Std({ ...surfaceMaps('brick', [170, 160, 145]) }), wood = Std({ color: 0x7a5230 });
+    const wallStone = Std({ ...(scan.castle_wall_varriation || surfaceMaps('brick', [170, 160, 145])) }), wood = Std({ color: 0x7a5230 });
     const R = 16.5, segs = 36;
     for (let k = 0; k < segs; k++) {
       const a = (k / segs) * Math.PI * 2, len = (2 * Math.PI * R) / segs + 0.1;
@@ -953,12 +972,25 @@ export class Game {
     pines.count = np; rounds.count = nr;
     for (const im of [trunks, pines, rounds]) { im.frustumCulled = false; world.add(im); }
     // mountains
-    const rock = Std({ color: 0x7d8aa6, flatShading: true }), snow = Std({ color: 0xffffff, flatShading: true });
+    // mountains: rugged ridged cones, forest at the foot, grey rock, snow on top
+    const haze = new THREE.Color(0xa9c4e0), mg = [], rockC = new THREE.Color(0x5b606b).lerp(haze, 0.3), footC = new THREE.Color(0x3d5a3a).lerp(haze, 0.3), snowC = new THREE.Color(0xf4f7fb);
     for (let k = 0; k < 18; k++) {
       const a = (k / 18) * Math.PI * 2 + Math.random() * 0.2, r = 420 + Math.random() * 80, h = 90 + Math.random() * 110, rad = 70 + Math.random() * 50;
-      S.add(new THREE.ConeGeometry(rad, h, 7), rock, [Math.cos(a) * r, h / 2 - 2, Math.sin(a) * r], [0, Math.random(), 0]);
-      S.add(new THREE.ConeGeometry(rad * 0.32, h * 0.32, 7), snow, [Math.cos(a) * r, h * 0.84 - 2, Math.sin(a) * r], [0, Math.random(), 0]);
+      const g2 = new THREE.ConeGeometry(rad, h, 36, 12), pp = g2.attributes.position, cols = [], ph = Math.random() * 10, lean = (Math.random() - 0.5) * 0.5;
+      for (let v = 0; v < pp.count; v++) {
+        const x = pp.getX(v), y = pp.getY(v), z = pp.getZ(v), t = y / h + 0.5, ang = Math.atan2(z, x);
+        const ridge = 1 + 0.22 * Math.sin(ang * 3 + ph) + 0.12 * Math.sin(ang * 7 + ph * 2) + 0.06 * Math.sin(ang * 13 + y * 0.05);
+        pp.setXYZ(v, x * ridge + lean * rad * t, y * (1 + 0.08 * Math.sin(ang * 5 + ph)), z * ridge);
+        const snowLine = 0.74 + 0.07 * Math.sin(ang * 6 + ph), c = t > snowLine ? snowC : t < 0.18 ? footC : rockC;
+        const shade = 0.85 + 0.15 * Math.sin(ang * 11 + y * 0.2);
+        cols.push(c.r * shade, c.g * shade, c.b * shade);
+      }
+      g2.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
+      g2.deleteAttribute('uv'); g2.computeVertexNormals();
+      g2.rotateY(Math.random() * 6).translate(Math.cos(a) * r, h / 2 - 2, Math.sin(a) * r);
+      mg.push(g2);
     }
+    world.add(new THREE.Mesh(mergeGeometries(mg), Std({ vertexColors: true, roughness: 1, fog: false })));
     // drifting clouds and a hot-air balloon
     const cloudMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, fog: false, emissive: 0x8899aa, emissiveIntensity: 0.35, flatShading: true });
     const cg = [];
@@ -966,7 +998,7 @@ export class Game {
       const a = Math.random() * Math.PI * 2, r = 140 + Math.random() * 260, y = 80 + Math.random() * 60;
       for (let j = 0; j < 5; j++) { const g2 = new THREE.IcosahedronGeometry(12 + Math.random() * 10, 1); g2.scale(1, 0.5, 1); g2.translate(Math.cos(a) * r + j * 13 - 26, y + Math.random() * 5, Math.sin(a) * r + Math.random() * 10); cg.push(g2.toNonIndexed()); }
     }
-    const clouds = new THREE.Mesh(mergeGeometries(cg), cloudMat); world.add(clouds); this.spinners.push({ o: clouds, kind: 'clouds' });
+    const clouds = new THREE.Mesh(mergeGeometries(cg), cloudMat); if (!photoSky) { world.add(clouds); this.spinners.push({ o: clouds, kind: 'clouds' }); }
     const balloon = new THREE.Group();
     const envTex = canvasTexture(256, 128, (c, w, h) => { const cols = ['#ff5c8a', '#ffd54a', '#5ce1ff', '#9b7bff', '#7dff6b']; for (let k = 0; k < 10; k++) { c.fillStyle = cols[k % 5]; c.fillRect((k * w) / 10, 0, w / 10 + 1, h); } });
     const env = new THREE.Mesh(new THREE.SphereGeometry(4, 20, 16), new THREE.MeshStandardMaterial({ map: envTex, roughness: 0.6 })); env.scale.y = 1.2; balloon.add(env);
@@ -975,9 +1007,43 @@ export class Game {
     world.add(balloon); this.balloon = balloon;
   }
 
+  // Place a copy of a scanned model on floor `floor` (world coords), with an optional soft
+  // contact shadow of size [w, d]. Returns null when the model didn't load.
+  putModel(S, name, floor, x, y, z, { rotY = 0, h = 0, s = 1, scale = null, blob = null } = {}) {
+    const src = this.assets?.models?.[name];
+    if (!src) return null;
+    if (!src.userData.box) { src.updateMatrixWorld(true); src.userData.box = new THREE.Box3().setFromObject(src); }
+    const o = src.clone(true);
+    if (h) s = h / (src.userData.box.max.y - src.userData.box.min.y);
+    if (scale) o.scale.set(...scale); else o.scale.setScalar(s);
+    o.position.set(x, y, z); o.rotation.y = rotY;
+    if (!this.decor[floor]) { this.decor[floor] = new THREE.Group(); this.world.add(this.decor[floor]); }
+    this.decor[floor].add(o);
+    if (blob) {
+      this.blobMat ??= Object.assign(new THREE.MeshBasicMaterial({ map: canvasTexture(64, 64, (c, w) => { const g = c.createRadialGradient(w / 2, w / 2, 2, w / 2, w / 2, w / 2); g.addColorStop(0, 'rgba(0,0,0,0.55)'); g.addColorStop(1, 'rgba(0,0,0,0)'); c.fillStyle = g; c.fillRect(0, 0, w, w); }), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 }), { userData: { noBlock: true } });
+      S.add(new THREE.PlaneGeometry(blob[0], blob[1]).rotateX(-Math.PI / 2).rotateY(rotY), this.blobMat, [x, y + 0.004, z]);
+    }
+    return o;
+  }
+
   decorate(S, i, W, D) {
     const { stoneDark, wood, woodDark, iron, gold, red, flame, Std } = this.mats, y0 = fy(i), hw = W / 2, hd = D / 2;
-    if (i === 0) {
+    const put = (name, x, z, o = {}) => this.putModel(S, name, i, x, y0 + (o.y || 0), z, o), has = (n) => !!this.assets?.models?.[n];
+    // lanterns standing in the window openings
+    for (const w of this.windows.filter((w) => w.y0 === y0)) {
+      const along = new THREE.Vector3(-w.out.z, 0, w.out.x), p = w.pos.clone().addScaledVector(along, WIN.w / 2 - 0.13).addScaledVector(w.out, -0.06);
+      put('Lantern_01', p.x, p.z, { y: WIN.sill, h: 0.36 });
+    }
+    // a chandelier between the hatch and the south wall
+    if (i < 4 && hd >= 1.4) put('Chandelier_01', 0, (HATCH / 2 + hd) / 2 + 0.1, { y: CEIL, h: 0.75 });
+    if (i === 0 && has('potted_plant_02')) {
+      put('potted_plant_02', -hw + 0.38, hd - 0.38, { h: 1.0, blob: [0.7, 0.7] });
+      if (hd >= 1.5) { // a chest of drawers with a horse statuette and a lantern
+        put('GothicCommode_01', -hw + 0.3, -0.55, { rotY: Math.PI / 2, blob: [1.4, 0.8] });
+        put('horse_statue_01', -hw + 0.3, -0.75, { y: 1.21, h: 0.34, rotY: Math.PI / 2 });
+        put('Lantern_01', -hw + 0.3, -0.2, { y: 1.21, h: 0.34 });
+      }
+    } else if (i === 0) {
       const leaf = Std({ color: 0x2f7d32 }), blue = Std({ color: 0x2a5bd7 }), white = Std({ color: 0xf2f2f2 }), pot = Std({ color: 0xb5653a, roughness: 0.8 });
       for (const sx of [-1]) { // corners by the lock hold the tray and scroll; flowers go south-west
         const x = sx * (hw - 0.3), z = hd - 0.3;
@@ -992,14 +1058,29 @@ export class Game {
     }
     if (i === 1) {
       const len = clamp(D - 1.4, 0.6, 2), x = hw - 0.3, z = -0.35;
-      S.box(0.5, 0.06, len, wood, [x, y0 + 0.74, z], [0, 0, 0], 1);
-      for (const dz of [-1, 1]) S.box(0.08, 0.72, 0.08, woodDark, [x, y0 + 0.36, z + dz * (len / 2 - 0.08)]);
+      if (put('WoodenTable_01', x, z, { rotY: Math.PI / 2, scale: [len / 1.795, 0.76 / 0.549, 0.5 / 0.657], blob: [0.8, len + 0.3] })) {
+        for (const dz of [-0.45, 0.45]) if (Math.abs(dz) < len / 2 - 0.15) put('carved_wooden_plate', x - 0.08, z + dz, { y: 0.782, h: 0.03 });
+      } else {
+        S.box(0.5, 0.06, len, wood, [x, y0 + 0.74, z], [0, 0, 0], 1);
+        for (const dz of [-1, 1]) S.box(0.08, 0.72, 0.08, woodDark, [x, y0 + 0.36, z + dz * (len / 2 - 0.08)]);
+      }
       S.box(0.52, 0.01, len * 0.9, Std({ color: 0xf2ead8 }), [x, y0 + 0.775, z]);
       for (const dz of [-0.3, 0.3]) { S.add(new THREE.CylinderGeometry(0.02, 0.02, 0.18, 6), Std({ color: 0xf5f0e0 }), [x + 0.15, y0 + 0.86, z + dz]); S.add(new THREE.ConeGeometry(0.02, 0.06, 6), flame, [x + 0.15, y0 + 0.98, z + dz]); }
       // painting above the feast table
-      const art = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.6), new THREE.MeshStandardMaterial({ map: this.paintingTexture(), roughness: 0.8 }));
-      art.position.set(hw - 0.045, y0 + 1.75, z); art.rotation.y = -Math.PI / 2; this.world.add(art);
-      S.box(0.02, 0.68, 0.98, gold, [hw - 0.02, y0 + 1.75, z]);
+      const frame = put('fancy_picture_frame_01', hw - 0.004, z, { y: 1.75, h: 0.78, rotY: -Math.PI / 2 });
+      if (frame) frame.traverse((o) => { // stretch the painting across the frame's canvas panel
+        if (!o.isMesh || !/canvas/i.test(o.name + o.material.name)) return;
+        const g2 = o.geometry = o.geometry.clone(), pos = g2.attributes.position, bb = (g2.computeBoundingBox(), g2.boundingBox), uv = [];
+        for (let k = 0; k < pos.count; k++) uv.push((pos.getX(k) - bb.min.x) / (bb.max.x - bb.min.x), (pos.getY(k) - bb.min.y) / (bb.max.y - bb.min.y));
+        g2.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+        o.material = new THREE.MeshStandardMaterial({ map: this.paintingTexture(), roughness: 0.8 });
+      });
+      else {
+        const art = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.6), new THREE.MeshStandardMaterial({ map: this.paintingTexture(), roughness: 0.8 }));
+        art.position.set(hw - 0.045, y0 + 1.75, z); art.rotation.y = -Math.PI / 2; this.world.add(art);
+        S.box(0.02, 0.68, 0.98, gold, [hw - 0.02, y0 + 1.75, z]);
+      }
+      if (hd >= 1.7) put('vintage_grandfather_clock_01', -hw + 0.24, -hd + 0.95, { rotY: Math.PI / 2, blob: [0.7, 0.6] });
     }
     if (i === 2) {
       const bookMats = [0x8e2430, 0x1f4e8c, 0x2e7d32, 0x6a3d9a, 0xb8860b].map((c) => Std({ color: c, roughness: 0.7 }));
@@ -1020,6 +1101,10 @@ export class Game {
         S.add(new THREE.CylinderGeometry(0.03, 0.03, 0.12, 8), Std({ color: 0xf5f0e0 }), [x, y0 + 2.46, z0 + len / 2 - 0.1]);
         S.add(new THREE.ConeGeometry(0.025, 0.07, 6), flame, [x, y0 + 2.56, z0 + len / 2 - 0.1]);
       }
+      const twoWin = windowSpots(W + 2 * WALL_T).length > 1;
+      if (twoWin) put('wooden_bookshelf_worn', 0, hd - 0.3, { rotY: Math.PI, blob: [1.5, 0.7] }); // between the two windows
+      else if (hw >= 1.5) put('vintage_grandfather_clock_01', -(WIN.w / 2 + 0.4), hd - 0.26, { rotY: Math.PI, blob: [0.7, 0.6] });
+      if (hd >= 2.4) put('GothicCabinet_01', -hw + 0.47, hd - 0.95, { rotY: Math.PI / 2, h: 2.2, blob: [1.6, 0.9] });
     }
     if (i === 3) {
       const steel = Std({ color: 0x9aa0ad, metalness: 0.85, roughness: 0.35 });
@@ -1035,9 +1120,17 @@ export class Game {
       }
       [0xc62828, 0x1565c0].forEach((c, k) => {
         const x = (k ? 1 : -1) * (hw - 0.3);
+        if (put('kite_shield', x, -hd + 0.06, { y: 2.2, h: 0.62 })) return;
         S.add(new THREE.CircleGeometry(0.2, 24), Std({ color: c, metalness: 0.3 }), [x, y0 + 2.2, -hd + 0.03]);
         S.add(new THREE.RingGeometry(0.17, 0.2, 24), gold, [x, y0 + 2.2, -hd + 0.035]);
       });
+      if (hd >= 1.3) { // a sword and a mace hung either side of the mirror
+        put('antique_estoc', hw - 0.08, 0.85, { y: 1.1, h: 1.2, rotY: -Math.PI / 2 });
+        put('ornate_medieval_mace', hw - 0.08, -0.85, { y: 1.3, h: 0.6, rotY: -Math.PI / 2 });
+      }
+      put('wine_barrel_01', -hw + 0.4, -hd + 0.4, { h: 0.85, blob: [0.9, 0.9] });
+      if (hd >= 1.7) put('wine_barrel_01', -hw + 0.4, -hd + 1.18, { h: 0.8, rotY: 1.3, blob: [0.9, 0.9] });
+      put('wooden_crate_01', hw - 0.5, -hd + 0.3, { h: 0.34, blob: [0.95, 0.5] });
     }
     if (i === 4) {
       const cryA = new THREE.MeshStandardMaterial({ color: 0x8fdcff, emissive: 0x2a6f99, roughness: 0.15, metalness: 0.1 }), cryB = new THREE.MeshStandardMaterial({ color: 0xd49bff, emissive: 0x5c2a8c, roughness: 0.15, metalness: 0.1 });
@@ -1055,6 +1148,7 @@ export class Game {
       }
     }
     if (i === TOP) {
+      for (const sx of [-1, 1]) put('potted_plant_02', sx * (hw - 0.4), hd - 0.4, { h: 1.0, rotY: sx, blob: [0.7, 0.7] });
       S.box(0.12, 0.9, 0.12, gold, [0, y0 + 0.45, -hd + 0.12]);
       // a telescope pointing at the mountains
       S.add(new THREE.CylinderGeometry(0.02, 0.03, 1.0, 8), woodDark, [hw - 0.35, y0 + 0.5, -hd + 0.4]);
@@ -1244,13 +1338,21 @@ export class Game {
 
   makeChest(i, big = false) {
     const g = new THREE.Group();
-    const woodM = new THREE.MeshStandardMaterial({ color: 0x7a4a22, roughness: 0.7 }), goldM = new THREE.MeshStandardMaterial({ color: 0xe0b23a, metalness: 0.85, roughness: 0.3 });
-    const base = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.5, 0.6), woodM); base.position.y = 0.25; g.add(base);
-    for (const x of [-0.35, 0.35]) { const t = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.52, 0.62), goldM); t.position.set(x, 0.25, 0); g.add(t); }
-    const lidPivot = new THREE.Group(); lidPivot.position.set(0, 0.5, -0.3); g.add(lidPivot);
-    const lid = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.9, 20, 1, false, 0, Math.PI).rotateZ(Math.PI / 2), woodM);
-    lid.position.set(0, 0, 0.3); lid.scale.set(1, 0.6, 1); lidPivot.add(lid);
-    const clasp = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.16, 0.04), goldM); clasp.position.set(0, 0.45, 0.31); g.add(clasp);
+    const model = this.assets?.models?.treasure_chest?.clone(true), lidNode = model?.getObjectByName('treasure_chest_lid');
+    let lidPivot;
+    if (lidNode) { // scanned chest: hinge its lid along the back top edge
+      g.add(model);
+      lidPivot = new THREE.Group(); lidPivot.position.set(0, lidNode.position.y, -0.255); model.add(lidPivot);
+      lidPivot.add(lidNode); lidNode.position.set(0, 0, 0.256);
+    } else {
+      const woodM = new THREE.MeshStandardMaterial({ color: 0x7a4a22, roughness: 0.7 }), goldM = new THREE.MeshStandardMaterial({ color: 0xe0b23a, metalness: 0.85, roughness: 0.3 });
+      const base = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.5, 0.6), woodM); base.position.y = 0.25; g.add(base);
+      for (const x of [-0.35, 0.35]) { const t = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.52, 0.62), goldM); t.position.set(x, 0.25, 0); g.add(t); }
+      lidPivot = new THREE.Group(); lidPivot.position.set(0, 0.5, -0.3); g.add(lidPivot);
+      const lid = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.9, 20, 1, false, 0, Math.PI).rotateZ(Math.PI / 2), woodM);
+      lid.position.set(0, 0, 0.3); lid.scale.set(1, 0.6, 1); lidPivot.add(lid);
+      const clasp = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.16, 0.04), goldM); clasp.position.set(0, 0.45, 0.31); g.add(clasp);
+    }
     const glow = new THREE.PointLight(0xffd27a, 0, 1.5); glow.position.set(0, 0.7, 0); g.add(glow);
     const s = big ? 1.1 : 0.7;
     g.scale.setScalar(s);
@@ -1827,6 +1929,8 @@ export class Game {
     this.panelH += (clamp(eye - 0.3, 0.75, 1.3) - this.panelH) * Math.min(1, dt * 2);
     for (const p of this.panels) { if (p.wallMounted) p.mesh.position.y = fy(p.floor) + this.panelH + (p.lift || 0); p.update(); }
     this.updateLift(dt, head);
+    const onFloor = Math.floor(head.y / FH); // only the floors she can see get their furniture drawn
+    this.decor.forEach((g, k) => { if (g) g.visible = Math.abs(k - onFloor) <= 1; });
     for (const a of this.anims) { a.t += dt; if (a.t >= 0) a.fn(Math.min(1, a.t / a.dur)); }
     for (const a of this.anims.filter((a) => a.t >= a.dur)) a.done?.();
     this.anims = this.anims.filter((a) => a.t < a.dur);

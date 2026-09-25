@@ -217,6 +217,8 @@
 </script>
 <script type="module">
 import { Game } from './js/game.js';
+import { loadAssets } from './js/assets.js';
+loadAssets(); // start fetching the castle art while the setup page is open
 import { MODULES, parseHomework } from './js/problems.js';
 import { AVATAR_OPTIONS, DEFAULT_AVATAR, FAMILY, familyDefaults, identityForName, avatarPreview } from './js/avatar.js';
 

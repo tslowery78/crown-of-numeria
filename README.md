@@ -16,6 +16,7 @@ Crown of Numeria is a room-scale WebXR math tower that runs in the Quest 3 brows
   - knight bowling in the Armory, which does the subtraction for her, e.g. "7 down! 10 − 7 = 3 standing";
   - pop bubbles from the cauldron and tap crystals that chime notes in the Crystal Chamber.
 - **Creatures:** a sleepy cat that purrs and meows when petted, an owl that turns its head to follow her, a friendly dragon circling the tower past the windows, bird flocks, and a hot-air balloon.
+- **Look:** scanned stone walls, flagstone and oak floors, and plank ceilings, with real furniture on every floor: a chest of drawers, grandfather clock, feast table, bookcase, cabinet, chandeliers, lanterns in the windows, barrels, shields and swords, and treasure chests whose lids open. The sky is a photographed panorama. Long walls in big rooms get two windows. Furniture is drawn only on the floor she's on and the ones next to it.
 - **Windows:** big arched windows look out on the kingdom: the courtyard and towers, a village with a windmill, a river and bridge, forests and mountains. The view gets higher on every floor.
 - **Sound:** soft generated music changes mood on each floor, and short musical cues play for correct answers, unlocking, chests, the lift and the victory. Sound effects are positioned in 3D, with wind at the windows, torches crackling and birds outside. Music volume is set on the setup screen.
 
@@ -154,6 +155,8 @@ Desktop and simulated XR tests do not establish Quest frame rate, stereo mirror 
 - `tests/`: `npm test` covers answer checking and 15,600 generated problems. `npm run test:browser:files` runs the full desktop and simulated-VR regression in Chrome, serving files from disk.
 - `js/audio.js`: procedural music, cues and 3D sound effects
 - `js/problems.js`: grade 2/4 problem generators, answer checking, homework parser
-- `vendor/three/`: three.js r186, bundled so the game doesn't need a CDN
+- `vendor/three/`: three.js r186, bundled so the game doesn't need a CDN (with GLTFLoader)
+- `js/assets.js`: loads the models, textures and sky. If anything fails to load, the game falls back to drawn textures and simple shapes.
+- `assets/models`, `assets/tex`, `assets/sky`: 3D models, PBR texture sets and sky panorama from [Poly Haven](https://polyhaven.com), all CC0 (public domain). Models are optimised with gltf-transform (512 px WebP textures, simplified meshes), about 8 MB in total.
 - `serve.sh`: local https server
 - `screenshots/`: screenshots from the desktop test run

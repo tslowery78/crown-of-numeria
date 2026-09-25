@@ -6,7 +6,7 @@
 // the face, hair, glasses and beard, plus a hero `style` and `outfit` colour
 // that any identity can change. Identity never decides the maths grade.
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/addons/BufferGeometryUtils.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 export const MIRROR_LAYER = 3;
 

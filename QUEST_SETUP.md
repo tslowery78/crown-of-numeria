@@ -39,7 +39,7 @@ The castle is then built to exactly that size (up to 8 × 8 m), sitting on your 
 - **Pick up and throw:** pinch or use the grip button near an object, and let go to throw.
 - **Go up a floor:** after unlocking the Magic Lock, stand on the glowing square in the middle.
 - **Magic Scroll:** write on it with a fingertip (or point and hold the trigger). **Keep page** saves the page for printing.
-- **Recenter:** hold the Meta button. The castle stays on the same spot; if the Quest asks, walk back to the middle and pinch.
+- **Recenter:** hold the Meta button. The castle normally stays on the same spot. If a sign says the castle moved, re-mark the front-left and then front-right corners (trigger or pinch in each). Her progress is kept.
 - **Stop playing:** press the Meta button and choose **Quit** (or take the headset off). Progress is saved.
 
 ## After playing (grown-ups)
@@ -56,5 +56,6 @@ Open her bookmark and tap **grown-up settings or homework**:
 | "VR not available here" | Make sure the page is open in the Quest's **Browser** (not the phone app), and the address starts `tslowery78.github.io`. Update the Quest if the Browser is old. |
 | The castle is in the wrong place or she walks through a wall | Tick **Measure the room again next time** in Grown-up settings and enter again. |
 | Too-close-to-the-edge warning | Step back towards the middle; it clears by itself. |
+| The castle looks plain (no furniture, drawn stone) | The castle art didn't download in time, usually on slow Wi-Fi. Quit, wait for the setup page to finish loading, and enter again. |
 | No sound or read-aloud | Turn up the Quest volume. Read-aloud needs the Quest's text-to-speech voice, and some headsets don't have one. |
 | Screen freezes or goes black | Press the Meta button, quit, and open the bookmark again. **Continue the climb** puts her back on her floor. |

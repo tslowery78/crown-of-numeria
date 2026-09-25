@@ -338,7 +338,7 @@ export class Props {
       return;
     }
     // walls, with openings at windows (and above the parapet on the roof)
-    const open = (side, u) => roof ? p.y > y0 + 1.0 + r : (fl.windows || '').includes(side) && Math.abs(u) < 0.45 - r * 0.5 && p.y > y0 + 0.8 + r && p.y < y0 + 2.3 - r;
+    const open = (side, u) => roof ? p.y > y0 + 1.0 + r : (fl.windows || '').includes(side) && (this.ctx.winSpots?.[side] || [0]).some((c) => Math.abs(u - c) < 0.45 - r * 0.5) && p.y > y0 + 0.8 + r && p.y < y0 + 2.3 - r;
     const wall = (axis, sign, side) => {
       const lim = (axis === 'x' ? hw : hd) - r;
       if (sign * p[axis] > lim) {
