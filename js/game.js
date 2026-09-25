@@ -12,7 +12,7 @@ import { buildAvatar, AvatarRig, MIRROR_LAYER } from './avatar.js';
 import { Props } from './props.js';
 import { GemTray } from './tray.js';
 import { MagicScroll } from './scroll.js';
-import { loadAssets } from './assets.js';
+import { loadAssets, ART_FLOORS } from './assets.js';
 
 // ------------------------------------------------------------ layout
 const FH = 3.6, SLAB = 0.4, CEIL = FH - SLAB, WALL_T = 0.3, HATCH = 1.2;
@@ -183,11 +183,12 @@ function drawGem(ctx, x, y, r, color) {
 const FONT = 'system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
 
 // A floating sign (static text) as a textured plane.
-function makeSign(text, { w = 2.4, h = 0.5, bg = '#3b2412', fg = '#ffe9a8', size = 90, border = '#d4a93a', px = 1024 } = {}) {
+function makeSign(text, { w = 2.4, h = 0.5, bg = '#f3e4bd', fg = '#513923', size = 90, border = '#d4a93a', px = 1024 } = {}) {
   const ph = Math.round(px * h / w);
   const tex = canvasTexture(px, ph, (ctx, cw, ch) => {
     ctx.fillStyle = bg; roundRect(ctx, 0, 0, cw, ch, 30); ctx.fill();
-    ctx.lineWidth = 12; ctx.strokeStyle = border; roundRect(ctx, 8, 8, cw - 16, ch - 16, 26); ctx.stroke();
+    ctx.lineWidth = 6; ctx.strokeStyle = border; roundRect(ctx, 8, 8, cw - 16, ch - 16, 26); ctx.stroke();
+    ctx.lineWidth = 2; roundRect(ctx, 18, 18, cw - 36, ch - 36, 18); ctx.stroke();
     const { lines, size: s } = fitText(ctx, text, cw - 80, ch - 60, size, 28);
     ctx.fillStyle = fg; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     lines.forEach((ln, i) => ctx.fillText(ln, cw / 2, ch / 2 + (i - (lines.length - 1) / 2) * s * 1.22));
@@ -688,7 +689,7 @@ export class Game {
     const tileMaps = pick('monastery_stone_floor', 'tile', [222, 206, 178], 0.9, 0xf2e6d6);
     const woodMaps = pick('old_wooden_floor_02', 'wood', [150, 98, 56], 0.7), plankMaps = pick('dark_wooden_planks', 'wood', [96, 60, 34], 0.75);
     const mats = this.mats = {
-      stone: Std(stoneMaps), stoneDark: Std(darkMaps),
+      stone: Std({ ...stoneMaps, normalScale: new THREE.Vector2(0.4, 0.4), aoMapIntensity: 0.45, emissive: 0xb9a88c, emissiveIntensity: 0.12 }), stoneDark: Std({ ...darkMaps, normalScale: new THREE.Vector2(0.4, 0.4), aoMapIntensity: 0.45 }),
       wood: Std(woodMaps), woodDark: Std(plankMaps),
       iron: Std({ color: 0x2c2c33, metalness: 0.6, roughness: 0.45 }), gold: Std({ color: 0xd9a627, metalness: 0.85, roughness: 0.3 }), red: Std({ color: 0x9c1b24 }),
       flame: new THREE.MeshBasicMaterial({ color: 0xffa640, toneMapped: false }), Std,
@@ -780,13 +781,19 @@ export class Game {
           this.torches.push({ sprite: fl2, pos: fl2.position.clone(), floor: i, ph: Math.random() * 6 });
         }
         const bx = Math.min(hw - 0.3, 0.95);
-        if (bx >= 0.7) { const bm = this.bannerMat(fl); for (const s of [-1, 1]) S.add(new THREE.PlaneGeometry(0.5, 1.0), bm, [s * bx, y0 + 2.5, hd - 0.02], [0, Math.PI, 0]); }
+        if (bx >= 0.7) { const bm = this.bannerMat(fl, i); for (const s of [-1, 1]) S.add(new THREE.PlaneGeometry(0.5, 1.0), bm, [s * bx, y0 + 2.5, hd - 0.02], [0, Math.PI, 0]); }
         const sign = makeSign(`Floor ${i + 1}: ${fl.name}`, { w: Math.min(1.8, W - 0.2), h: 0.32, size: 80 });
         sign.position.set(0, y0 + 2.3, -hd + 0.02); world.add(sign);
-        // rug in front of the Magic Lock
-        const rugMat = Std({ map: this.rugTexture(fl.banner), roughness: 1 }); rugMat.userData.noBlock = true;
-        S.add(new THREE.CircleGeometry(Math.min(0.55, hd - HATCH / 2 - 0.05), 40), rugMat, [0, y0 + 0.004, -hd + Math.min(0.55, hd - HATCH / 2 - 0.05) + 0.02], [-Math.PI / 2, 0, 0]);
+
       }
+      // Textiles also mark the open-air final floor. Keep the lift centre clear.
+      if (roof) {
+        const bm = this.bannerMat(fl, i);
+        for (const sx of [-1, 1]) S.add(new THREE.PlaneGeometry(0.42, 0.84), bm, [sx * (hw - 0.35), y0 + 0.55, hd - 0.02], [0, Math.PI, 0]);
+      }
+      const rugMat = Std({ map: this.rugTexture(fl.banner, i), roughness: 1, alphaTest: 0.5 }); rugMat.userData.noBlock = true;
+      const radius = Math.min(0.55, hd - HATCH / 2 - 0.05);
+      S.add(new THREE.CircleGeometry(radius, 48), rugMat, [0, y0 + 0.004, -hd + radius + 0.02], [-Math.PI / 2, 0, 0]);
       this.decorate(S, i, W, D);
     });
     S.build(world, this.blockers);
@@ -820,7 +827,8 @@ export class Game {
     this.updateHud();
   }
 
-  rugTexture(color) {
+  rugTexture(color, floor) {
+    if (this.assets?.art?.[`rug-${ART_FLOORS[floor]}`]) return this.assets.art[`rug-${ART_FLOORS[floor]}`];
     return canvasTexture(512, 512, (c, w, h) => {
       c.fillStyle = color; c.beginPath(); c.arc(w / 2, h / 2, w / 2, 0, 7); c.fill();
       c.strokeStyle = '#ffd54a'; c.lineWidth = 14; c.beginPath(); c.arc(w / 2, h / 2, w / 2 - 20, 0, 7); c.stroke();
@@ -831,13 +839,13 @@ export class Game {
     });
   }
 
-  bannerMat(fl) {
-    const m = new THREE.MeshStandardMaterial({ roughness: 0.95, map: canvasTexture(256, 512, (ctx, w, h) => {
+  bannerMat(fl, floor) {
+    const m = new THREE.MeshStandardMaterial({ roughness: 0.95, map: this.assets?.art?.[`banner-${ART_FLOORS[floor]}`] || canvasTexture(256, 512, (ctx, w, h) => {
       ctx.fillStyle = fl.banner; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(w, 0); ctx.lineTo(w, h); ctx.lineTo(w / 2, h - 80); ctx.lineTo(0, h); ctx.fill();
       ctx.fillStyle = '#ffd54a'; ctx.fillRect(0, 0, w, 24);
       ctx.strokeStyle = '#ffd54a'; ctx.lineWidth = 6; ctx.strokeRect(18, 40, w - 36, h - 150);
       ctx.font = 'bold 150px serif'; ctx.textAlign = 'center'; ctx.fillText(fl.emblem, w / 2, 250);
-    }), transparent: true, side: THREE.DoubleSide });
+    }), alphaTest: 0.5, side: THREE.DoubleSide });
     m.userData.noBlock = true;
     return m;
   }
@@ -1029,6 +1037,18 @@ export class Game {
   decorate(S, i, W, D) {
     const { stoneDark, wood, woodDark, iron, gold, red, flame, Std } = this.mats, y0 = fy(i), hw = W / 2, hd = D / 2;
     const put = (name, x, z, o = {}) => this.putModel(S, name, i, x, y0 + (o.y || 0), z, o), has = (n) => !!this.assets?.models?.[n];
+    if (i === 0) this.hangPainting(S, i, 'kingdom', -hw + 0.025, 2.15, -0.55, Math.PI / 2);
+    if (i === 2) this.hangPainting(S, i, 'dragon', -hw + 0.025, 2.82, -0.3, Math.PI / 2, 0.48);
+    if (i === 4 && D >= 3.5) this.hangPainting(S, i, 'unicorn', hw - 0.025, 2.72, 0, -Math.PI / 2, 0.62);
+    // Window-free side walls only; never the north puzzle wall or east mirrors.
+    const tapestry = this.assets?.art?.[`tapestry-${i === 0 ? 'garden' : 'journey'}`]; // none until the art exists
+    if (tapestry && W >= 5 && D >= 5 && (i === 0 || i === 1)) {
+      const west = i === 0, x = west ? -hw + 0.04 : hw - 0.04, z = hd - 1.45;
+      const mat = Std({ map: tapestry, roughness: 1 });
+      mat.userData.noBlock = true;
+      S.add(new THREE.PlaneGeometry(2.1, 1.05), mat, [x, y0 + 2.0, z], [0, west ? Math.PI / 2 : -Math.PI / 2, 0]);
+      S.box(0.06, 0.045, 2.22, woodDark, [x, y0 + 2.56, z]);
+    }
     // lanterns standing in the window openings
     for (const w of this.windows.filter((w) => w.y0 === y0)) {
       const along = new THREE.Vector3(-w.out.z, 0, w.out.x), p = w.pos.clone().addScaledVector(along, WIN.w / 2 - 0.13).addScaledVector(w.out, -0.06);
@@ -1067,23 +1087,16 @@ export class Game {
       S.box(0.52, 0.01, len * 0.9, Std({ color: 0xf2ead8 }), [x, y0 + 0.775, z]);
       for (const dz of [-0.3, 0.3]) { S.add(new THREE.CylinderGeometry(0.02, 0.02, 0.18, 6), Std({ color: 0xf5f0e0 }), [x + 0.15, y0 + 0.86, z + dz]); S.add(new THREE.ConeGeometry(0.02, 0.06, 6), flame, [x + 0.15, y0 + 0.98, z + dz]); }
       // painting above the feast table
-      const frame = put('fancy_picture_frame_01', hw - 0.004, z, { y: 1.75, h: 0.78, rotY: -Math.PI / 2 });
-      if (frame) frame.traverse((o) => { // stretch the painting across the frame's canvas panel
-        if (!o.isMesh || !/canvas/i.test(o.name + o.material.name)) return;
-        const g2 = o.geometry = o.geometry.clone(), pos = g2.attributes.position, bb = (g2.computeBoundingBox(), g2.boundingBox), uv = [];
-        for (let k = 0; k < pos.count; k++) uv.push((pos.getX(k) - bb.min.x) / (bb.max.x - bb.min.x), (pos.getY(k) - bb.min.y) / (bb.max.y - bb.min.y));
-        g2.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
-        o.material = new THREE.MeshStandardMaterial({ map: this.paintingTexture(), roughness: 0.8 });
-      });
-      else {
-        const art = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.6), new THREE.MeshStandardMaterial({ map: this.paintingTexture(), roughness: 0.8 }));
-        art.position.set(hw - 0.045, y0 + 1.75, z); art.rotation.y = -Math.PI / 2; this.world.add(art);
-        S.box(0.02, 0.68, 0.98, gold, [hw - 0.02, y0 + 1.75, z]);
-      }
+      this.hangPainting(S, i, 'sunset', hw - 0.025, 1.8, z, -Math.PI / 2);
       if (hd >= 1.7) put('vintage_grandfather_clock_01', -hw + 0.24, -hd + 0.95, { rotY: Math.PI / 2, blob: [0.7, 0.6] });
     }
     if (i === 2) {
-      const bookMats = [0x8e2430, 0x1f4e8c, 0x2e7d32, 0x6a3d9a, 0xb8860b].map((c) => Std({ color: c, roughness: 0.7 }));
+      const bookMats = ['#865157', '#506c89', '#617858', '#796384', '#b18a4d', '#aa7558'].map((color) => Std({ roughness: 0.95, map: canvasTexture(64, 128, (c, w, h) => {
+        c.fillStyle = color; c.fillRect(0, 0, w, h);
+        c.fillStyle = '#cbb78a'; for (const y of [14, 20, 106, 112]) c.fillRect(5, y, w - 10, 2);
+        c.fillStyle = 'rgba(255,239,200,0.16)'; c.fillRect(4, 0, 3, h);
+        c.strokeStyle = '#cbb78a'; c.lineWidth = 2; c.strokeRect(22, 48, 20, 24);
+      }) }));
       const len = clamp(D - 1.2, 0.6, 2.6), z0 = -0.3;
       for (const s of [-1, 1]) {
         const x = s * (hw - 0.15);
@@ -1156,7 +1169,30 @@ export class Game {
     }
   }
 
-  paintingTexture() {
+  hangPainting(S, floor, subject, x, y, z, rotY, size = 0.78) {
+    const map = this.paintingTexture(subject);
+    // The scanned frame is landscape; scale its local width to a square opening.
+    const frame = this.putModel(S, 'fancy_picture_frame_01', floor, x, fy(floor) + y, z, { h: size, rotY });
+    if (frame) {
+      frame.scale.x *= 0.72;
+      frame.traverse((o) => {
+        if (!o.isMesh || !/canvas/i.test(o.name + o.material.name)) return;
+        const geo = o.geometry = o.geometry.clone(), pos = geo.attributes.position;
+        geo.computeBoundingBox(); const bb = geo.boundingBox, uv = [];
+        for (let k = 0; k < pos.count; k++) uv.push((pos.getX(k) - bb.min.x) / (bb.max.x - bb.min.x), (pos.getY(k) - bb.min.y) / (bb.max.y - bb.min.y));
+        geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+        o.material = this.mats.Std({ map, roughness: 1 });
+      });
+    } else {
+      const mat = this.mats.Std({ map, roughness: 1 }); mat.userData.noBlock = true;
+      const inward = new THREE.Vector3(0, 0, 0.012).applyAxisAngle(new THREE.Vector3(0, 1, 0), rotY);
+      S.add(new THREE.PlaneGeometry(size, size), mat, [x + inward.x, fy(floor) + y, z + inward.z], [0, rotY, 0]);
+      S.box(size + 0.07, size + 0.07, 0.018, this.mats.gold, [x, fy(floor) + y, z], [0, rotY, 0]);
+    }
+  }
+
+  paintingTexture(subject = 'kingdom') {
+    if (this.assets?.art?.[`painting-${subject}`]) return this.assets.art[`painting-${subject}`];
     return canvasTexture(384, 256, (c, w, h) => {
       const g = c.createLinearGradient(0, 0, 0, h); g.addColorStop(0, '#8fc6ff'); g.addColorStop(1, '#ffe7b0'); c.fillStyle = g; c.fillRect(0, 0, w, h);
       c.fillStyle = '#6fa04a'; c.beginPath(); c.moveTo(0, h * 0.7); c.quadraticCurveTo(w * 0.3, h * 0.5, w * 0.6, h * 0.7); c.quadraticCurveTo(w * 0.8, h * 0.8, w, h * 0.65); c.lineTo(w, h); c.lineTo(0, h); c.fill();

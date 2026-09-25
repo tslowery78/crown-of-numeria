@@ -14,6 +14,12 @@ export const MODELS = [
 ];
 // texture set -> size of one texture tile in metres (from the scans' real-world size)
 export const SURFACES = { castle_wall_varriation: 2.4, medieval_blocks_02: 2, monastery_stone_floor: 2.5, old_wooden_floor_02: 2.2, dark_wooden_planks: 2 };
+export const ART_FLOORS = ['entrance', 'hall', 'library', 'armory', 'crystal', 'tower'];
+export const ART = [
+  ...['kingdom', 'dragon', 'sunset', 'unicorn'].map((n) => `painting-${n}`),
+  ...ART_FLOORS.map((n) => `banner-${n}`),
+  // rug-<floor> and tapestry-garden/journey are wired in but not painted yet; add them here when they exist
+];
 
 const settle = (p) => p.then((v) => v, (e) => { console.warn('asset failed', e?.message || e); return null; });
 
@@ -48,11 +54,16 @@ function load({ timeout = 30000 } = {}) {
     return gltf.scene;
   };
   const sky = tl.loadAsync(new URL('sky/sky_4k.jpg', BASE).href).then((t) => { t.mapping = THREE.EquirectangularReflectionMapping; t.colorSpace = THREE.SRGBColorSpace; return t; });
+  const art = (name) => tl.loadAsync(new URL(`art/${name}.webp`, BASE).href).then((t) => {
+    t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+    return t; // clamp edges; the painted art must not repeat like stone tiles
+  });
   const all = Promise.all([
     Promise.all(Object.entries(SURFACES).map(([n, s]) => settle(surface(n, s)).then((v) => [n, v]))),
     Promise.all(MODELS.map((n) => settle(model(n)).then((v) => [n, v]))),
     settle(sky),
-  ]).then(([surf, mods, skyTex]) => ({ surfaces: Object.fromEntries(surf), models: Object.fromEntries(mods), sky: skyTex }));
-  const empty = { surfaces: {}, models: {}, sky: null };
+    Promise.all(ART.map((n) => settle(art(n)).then((v) => [n, v]))),
+  ]).then(([surf, mods, skyTex, artTex]) => ({ surfaces: Object.fromEntries(surf), models: Object.fromEntries(mods), sky: skyTex, art: Object.fromEntries(artTex) }));
+  const empty = { surfaces: {}, models: {}, sky: null, art: {} };
   return Promise.race([all, new Promise((res) => setTimeout(() => res(empty), timeout))]);
 }
