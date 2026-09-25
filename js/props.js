@@ -101,7 +101,7 @@ function makeOwl() {
   const beak = new THREE.Mesh(new THREE.ConeGeometry(0.012, 0.03, 6), std('#e8a63a')); beak.rotation.x = Math.PI / 2 + 0.3; beak.position.set(0, -0.02, -0.08); head.add(beak);
   return { group: g, head, lids };
 }
-function makeDragon() {
+export function makeDragon() {
   const g = new THREE.Group(), scale = std('#7b4fd6', { roughness: 0.55 }), belly = std('#ffd27a', { roughness: 0.6 }), horn = std('#fff4d6');
   const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.35, 0.9, 8, 16), scale); body.rotation.x = Math.PI / 2; g.add(body);
   const bel = new THREE.Mesh(new THREE.CapsuleGeometry(0.28, 0.7, 6, 12), belly); bel.rotation.x = Math.PI / 2; bel.position.y = -0.12; g.add(bel);

@@ -22,7 +22,7 @@ const url=process.argv[2]||'http://127.0.0.1:8765/';
   await page.locator('#homework').fill('');await page.locator('#deskBtn').click();assert.match(dialogs.pop(),/at least one valid/);
   await page.locator('#hwOnly').uncheck();
   await page.locator('#homework').fill('First | 1/2\nSecond | -1 1/2\n'+Array.from({length:6},(_,i)=>`Homework ${i+3} | ${i+3}`).join('\n'));
-  await page.locator('#deskBtn').click();await page.waitForFunction(()=>window.__castle?.props);
+  await page.evaluate(()=>document.querySelector('.modeChips .chip[data-mode=castle]').click());await page.locator('#deskBtn').click();await page.waitForFunction(()=>window.__castle?.props);
   // Count real GPU submissions from the hidden preview, not just visibility.
   await page.evaluate(()=>{window.previewCalls=0;for(const key of ['drawElements','drawArrays','drawElementsInstanced','drawArraysInstanced']){const old=WebGL2RenderingContext.prototype[key];WebGL2RenderingContext.prototype[key]=function(...args){if(this.canvas.id==='avPreview')previewCalls++;return old.apply(this,args);};}});
   await page.waitForTimeout(500);assert.equal(await page.evaluate(()=>previewCalls),0);
@@ -75,7 +75,7 @@ const url=process.argv[2]||'http://127.0.0.1:8765/';
   await page.reload();await page.locator('#quickEdit').click();
   assert.equal(await page.locator('#avStyle .on').innerText(),'Wizard');assert.equal(await page.locator('#avHairStyle .on').innerText(),'Braids');
   assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('mathcastle.progress.regression')).castles),1);
-  await page.locator('#deskBtn').click();await page.waitForFunction(()=>window.__castle?.props);
+  await page.evaluate(()=>document.querySelector('.modeChips .chip[data-mode=castle]').click());await page.locator('#deskBtn').click();await page.waitForFunction(()=>window.__castle?.props);
   const xr=await page.evaluate(async()=>{
    const g=__castle,T=await import('three');g.renderer.setAnimationLoop(null);const original=navigator.xr;
    const methods={setSession:g.renderer.xr.setSession,getReferenceSpace:g.renderer.xr.getReferenceSpace,setReferenceSpace:g.renderer.xr.setReferenceSpace};
@@ -127,7 +127,7 @@ const url=process.argv[2]||'http://127.0.0.1:8765/';
    s.lift(ptr);return {paths:s.paths.length,points:s.paths[0].p.length/2,w:s.w};});
   assert.deepEqual({paths:ink.paths,points:ink.points},{paths:1,points:20});
   await page.goto(url+'?player=Grade4Regression&grade=4');await page.locator('#quickEdit').click();
-  await page.locator('#homework').fill('Fraction | 7/8\nNegative decimal | -4.5\nWhich symbol? | < | <; >; =');await page.locator('#hwOnly').check();await page.locator('#deskBtn').click();await page.waitForFunction(()=>window.__castle?.props);
+  await page.locator('#homework').fill('Fraction | 7/8\nNegative decimal | -4.5\nWhich symbol? | < | <; >; =');await page.locator('#hwOnly').check();await page.evaluate(()=>document.querySelector('.modeChips .chip[data-mode=castle]').click());await page.locator('#deskBtn').click();await page.waitForFunction(()=>window.__castle?.props);
   const grade4=await page.evaluate(()=>{
    const g=__castle;g.renderer.setAnimationLoop(null);
    const first=g.locks[0].panel;first.input='123';first.pressKey('OK');
@@ -142,7 +142,24 @@ const url=process.argv[2]||'http://127.0.0.1:8765/';
    return {level:g.level+1,correct:g.stats.correct,missed:g.stats.missed.length,homeworkOnly:g.source.homeworkOnly};
   });
   assert.deepEqual(grade4,{level:6,correct:13,missed:1,homeworkOnly:true});assert.deepEqual(errors,[]);
-  const result={url,game,grade4,xr,errors,hiddenPreviewDraws:0};
+  // My Kingdom (mixed-reality mode, played here on the desktop): a solved problem pays gems, a building
+  // bought with them lands on the free cell she chose, pond cells are refused, and the kingdom survives a reload.
+  await page.goto(url+'?player=KingdomRegression&grade=2');await page.locator('#quickEdit').click();
+  await page.evaluate(()=>document.querySelector('.modeChips .chip[data-mode=kingdom]').click());
+  await page.locator('#deskBtn').click();await page.waitForFunction(()=>window.__castle?.shop&&window.__castle.buildings);
+  const kingdom=await page.evaluate(async()=>{
+   const g=__castle,p=g.board,ptr=g.desktopPtr,r={start:g.gems,pieces:Object.keys(g.kit).length};
+   p.busyUntil=0;p.input='';if(p.problem.choices)p.pressKey('choice:'+p.problem.answer);else{for(const k of p.problem.answer)p.pressKey(k);p.pressKey('OK');}
+   await new Promise(res=>setTimeout(res,2500));r.afterSolve=g.gems;
+   const put=(id,i,j)=>{const e=g.shop.slots.find(s=>s.item.id===id);if(!g.pickFromShop(ptr,e))return false;const c=g.cellCentre(i,j,e.item.foot||1);ptr.holding.obj.parent.remove(ptr.holding.obj);g.island.add(ptr.holding.obj);ptr.holding.obj.position.copy(c).setY(0.1);g.drop(ptr);return g.buildings.some(b=>b.id===id&&b.i===i&&b.j===j);};
+   r.cottage=put('cottage',1,0);r.gemsAfterBuy=g.gems;r.onTaken=put('tree',1,0);r.onPond=put('tree',-2,-2);
+   r.visibleMeshes=0;g.buildings[0].model.traverse(o=>{if(o.isMesh&&o.geometry.attributes.position.count)r.visibleMeshes++;});
+   return r;});
+  assert.ok(kingdom.pieces>=50,'kit pieces '+kingdom.pieces);assert.equal(kingdom.afterSolve,kingdom.start+3);
+  assert.equal(kingdom.cottage,true);assert.equal(kingdom.gemsAfterBuy,kingdom.afterSolve-3);assert.equal(kingdom.onTaken,false);assert.equal(kingdom.onPond,false);assert.ok(kingdom.visibleMeshes>0);
+  await page.reload();await page.locator('#deskBtn').click();await page.waitForFunction(()=>window.__castle?.shop&&window.__castle.buildings);
+  kingdom.restored=await page.evaluate(()=>__castle.buildings.map(b=>b.id).join());assert.equal(kingdom.restored,'cottage');assert.deepEqual(errors,[]);
+  const result={url,game,grade4,kingdom,xr,errors,hiddenPreviewDraws:0};
   if(process.env.TEST_OUTPUT)fs.writeFileSync(process.env.TEST_OUTPUT+'/browser-result.json',JSON.stringify(result,null,2));
   console.log(JSON.stringify(result,null,2));
  } finally {await browser.close();}

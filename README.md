@@ -2,6 +2,14 @@
 
 Crown of Numeria is a room-scale WebXR math tower that runs in the Quest 3 browser. Each floor of the castle tower is one room the size of your real play area, so the girls physically walk around it.
 
+There are two games, chosen on the setup screen:
+
+- **👑 My Kingdom (mixed reality, the default).** The Quest shows her real room, and a floating grass island appears about 1.5 m in front of her. Every quest problem she solves earns gems: 3 on the first try, 2 after a retry. Every 5 problems finish a Royal Quest, which earns 5 bonus gems and a dragon that circles the island. In the Builder's Shop she spends gems on trees, flowers, lamp posts, pumpkins, market stalls, tents, carts, cottages, big houses, fountains, towers, windmills, a wizard tower and a 2×2 castle (1–12 gems). She grabs a building (pinch, grip, or point and pull the trigger) and drops it on the island. A ring shows where it will land: green for free, red for taken. She can pick buildings up again to move them. The kingdom is saved on the headset for each player and grows every time she plays. The quest board, Magic Scroll, gem tray, homework report and answer-booklet inserts all work the same as in the tower. **Move my kingdom here** (under the shop) or holding the Meta button puts the island back in front of her. It needs about 3 × 3 m of clear floor, with the real furniture still visible.
+- **🏰 Castle Climb (all VR).** This is the original tower game, described below.
+
+The kingdom's buildings are put together from Kenney's Fantasy Town, Castle and Nature kits ([kenney.nl](https://kenney.nl), CC0), packed into `assets/kingdom/kingdom.glb` (555 KB). `js/kingdom.js` holds the game.
+
+
 - **Floors:** there are six, in this order: Entrance Hall, Great Hall, Royal Library, Knights' Armory, Crystal Chamber, and the open-air Tower Top.
 - **Magic Lock:** each floor has one on the north wall. Solving its problems dissolves the hatch in the ceiling. Standing on the glowing square in the middle of the room then lifts the player up to the next floor, so nobody has to walk outside the play area.
 - **Treasure chests:** each floor has one in a corner. Touch it to get a bonus problem and a gem.

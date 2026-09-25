@@ -411,7 +411,7 @@ export class Game {
     this.anims = []; this.particles = []; this.extraTips = [];
     this.initRenderer();
     this.assets = null;
-    this.assetsReady = loadAssets().then((a) => (this.assets = a));
+    this.assetsReady = opts.mode === 'kingdom' ? Promise.resolve(null) : loadAssets().then((a) => (this.assets = a)); // the kingdom has its own kit
     this.initControls();
     this.renderer.setAnimationLoop((time, frame) => this.frame(frame));
   }
@@ -636,7 +636,8 @@ export class Game {
 
   // ---------------------------------------------------------- setup
   initRenderer() {
-    const r = this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    // the kingdom plays in mixed reality: a transparent canvas lets the Quest's passthrough show through
+    const r = this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', alpha: this.opts.mode === 'kingdom' });
     r.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     r.setSize(window.innerWidth, window.innerHeight);
     r.toneMapping = THREE.ACESFilmicToneMapping; r.toneMappingExposure = 1.05;
@@ -1898,7 +1899,7 @@ export class Game {
         const hit = touch || ptr.holding ? null : this.castFrom(o, d);
         ptr.hit = hit;
         if (ptr.rayDrawing) { if (hit?.type === 'scroll') this.scroll.rayDraw(ptr, hit.uv); else this.scroll.lift(ptr); }
-        const useful = hit && ['panel', 'chest', 'grab', 'touch', 'tray', 'scroll'].includes(hit.type) && (hit.type !== 'grab' || hit.distance < 3.2);
+        const useful = hit && ['panel', 'chest', 'grab', 'touch', 'tray', 'scroll', 'shop', 'building', 'button'].includes(hit.type) && (hit.type !== 'grab' || hit.distance < 3.2);
         if (useful && hit.type === 'panel') hovered.set(hit.panel, hit.uv);
         ptr.ray.visible = !!useful; if (useful) ptr.ray.scale.z = hit.distance;
         ptr.dot.visible = !!useful; if (useful) ptr.dot.position.copy(hit.point);
@@ -2017,3 +2018,6 @@ export class Game {
     if (torches.length && Math.random() < 0.35) this.audio.crackle(torches[Math.floor(Math.random() * torches.length)].pos);
   }
 }
+
+// shared with the mixed-reality kingdom (kingdom.js)
+export { Panel, makeSign, canvasTexture, roundRect, drawGem, fitText, FONT, speak, clamp };

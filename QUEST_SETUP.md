@@ -30,6 +30,7 @@ The castle is then built to exactly that size (up to 8 × 8 m), sitting on your 
 ## Every time she plays
 
 1. Put the headset on and open **Browser → Bookmarks → her name**.
+   Pick **👑 My Kingdom** (she sees your real room and builds her own kingdom with the gems she earns) or **🏰 Castle Climb** (the all-VR tower). My Kingdom needs about 3 × 3 m of clear floor. The island appears about 1.5 m in front of wherever she's facing when it starts, so face an open part of the room.
 2. If she stopped part-way last time, leave **Continue the climb** selected.
 3. Tap **Enter the Castle in VR**. If the Quest asks to allow immersive mode, choose **Allow**. The castle appears in the room you measured, so she can start from anywhere in it.
 

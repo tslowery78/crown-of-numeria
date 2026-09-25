@@ -91,11 +91,12 @@
 <body>
 <div id="setup">
   <div class="banner" role="img" aria-label="A storybook castle with a friendly purple dragon">
-    <div class="titleText"><h1>👑 Crown of Numeria</h1><p>Climb the magic tower! Solve each Magic Lock, open the treasure chests, and claim the crown at the top.</p></div>
+    <div class="titleText"><h1>👑 Crown of Numeria</h1><p>Solve your homework to earn gems: build your own kingdom in your room, or climb the magic tower to the crown.</p></div>
   </div>
   <div class="card">
   <section id="quick" style="display:none;text-align:center">
     <h2 id="quickHi" style="font-size:28px"></h2>
+    <div class="chips modeChips" style="justify-content:center;margin:8px 0"><button class="chip" data-mode="kingdom">👑 My Kingdom (see my room)</button><button class="chip" data-mode="castle">🏰 Castle Climb (all VR)</button></div>
     <button class="go" id="quickVr" disabled>Checking for VR…</button>
     <p class="note"><small class="link" id="quickEdit">grown-up settings or homework</small></p>
   </section>
@@ -124,6 +125,7 @@
     <div class="chips"><button class="chip on" id="resumeYes">Continue the climb</button><button class="chip" id="resumeNo">Start a new tower</button></div>
   </section>
 
+  <div class="chips modeChips" style="justify-content:center;margin:8px 0"><button class="chip" data-mode="kingdom">👑 My Kingdom (see my room)</button><button class="chip" data-mode="castle">🏰 Castle Climb (all VR)</button></div>
   <div class="playRow">
     <button class="go" id="vrBtn" disabled>Checking for VR…</button>
     <button class="go" id="deskBtn">Play on this screen</button>
@@ -217,14 +219,26 @@
 </script>
 <script type="module">
 import { Game } from './js/game.js';
+import { Kingdom, loadKit } from './js/kingdom.js';
 import { loadAssets } from './js/assets.js';
-loadAssets(); // start fetching the castle art while the setup page is open
 import { MODULES, parseHomework } from './js/problems.js';
 import { AVATAR_OPTIONS, DEFAULT_AVATAR, FAMILY, familyDefaults, identityForName, avatarPreview } from './js/avatar.js';
 
 const $ = (id) => document.getElementById(id);
 const store = { get: (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } }, set: (k, v) => localStorage.setItem(k, JSON.stringify(v)) };
 let grade = null;
+// Which game: 'kingdom' (mixed reality, builds her kingdom) or 'castle' (the VR tower climb).
+let mode = 'kingdom', arOK = false, vrOK = false;
+function setMode(m) {
+  mode = m === 'castle' ? 'castle' : 'kingdom';
+  document.querySelectorAll('.modeChips .chip').forEach((b) => b.classList.toggle('on', b.dataset.mode === mode));
+  if (mode === 'castle') loadAssets(); else loadKit(); // start fetching that game's art while the page is open
+  updateVrButtons();
+}
+function updateVrButtons() {
+  const ok = mode === 'kingdom' ? arOK || vrOK : vrOK;
+  for (const id of ['vrBtn', 'quickVr']) { const b = document.getElementById(id); if (!b || !navigator.xr) continue; b.disabled = !ok; b.textContent = !ok ? 'VR not available here' : mode === 'kingdom' ? '👑 Build my Kingdom' : '🥽 Enter the Castle in VR'; }
+}
 const familyNames = () => store.get('mathcastle.family', {});
 const famName = (id) => familyNames()[id] || FAMILY[id].label;
 let avatar = { ...DEFAULT_AVATAR };
@@ -280,7 +294,9 @@ function renderMods(selected) {
 }
 function setGrade(g, selected) {
   grade = g;
-  document.querySelectorAll('.grade').forEach((b) => b.classList.toggle('on', Number(b.dataset.grade) === g));
+  document.querySelectorAll('.modeChips .chip').forEach((b) => (b.onclick = () => setMode(b.dataset.mode)));
+setMode(mode);
+document.querySelectorAll('.grade').forEach((b) => b.classList.toggle('on', Number(b.dataset.grade) === g));
   renderMods(selected);
   checkHomework();
 }
@@ -302,7 +318,7 @@ function loadProfile(name) {
   $('autoRead').checked = s.autoRead ?? s.grade === 2;
   // the old 2.5 m default becomes full-room play; deliberate other sizes stay
   $('perDoor').value = String(s.perDoor || 2); $('roomSize').value = !s.roomSize || (s.roomSize === '2.5' && !s.roomChosen) ? 'room' : s.roomSize;
-  setGrade(s.grade, s.moduleIds);
+  setGrade(s.grade, s.moduleIds); setMode(s.mode);
   renderResume(); $('report').innerHTML = ''; $('missedToHw').style.display = 'none'; $('booklet').innerHTML = ''; $('bookletNote').textContent = '';
 }
 function renderProfiles() {
@@ -324,7 +340,7 @@ function collect() {
   const { problems: hw, errors } = parseHomework($('homework').value, grade);
   if (errors.length) { alert(`Please fix the homework before starting:\n${errors.join('\n')}`); return null; }
   if ($('hwOnly').checked && !hw.length) { alert('Add at least one valid homework problem for this grade, or turn off homework only.'); return null; }
-  const settings = { name, grade, moduleIds, perDoor: Number($('perDoor').value), roomSize: $('roomSize').value, roomChosen: true, remeasure: $('remeasure').checked, avatar: { ...avatar }, music: Number($('music').value), autoRead: $('autoRead').checked, homework: $('homework').value, homeworkOnly: $('hwOnly').checked };
+  const settings = { name, grade, moduleIds, perDoor: Number($('perDoor').value), roomSize: $('roomSize').value, roomChosen: true, remeasure: $('remeasure').checked, avatar: { ...avatar }, music: Number($('music').value), autoRead: $('autoRead').checked, homework: $('homework').value, homeworkOnly: $('hwOnly').checked, mode };
   store.set(profileKey(name), { ...settings, remeasure: false }); // re-measuring is a one-off
   const names = store.get('mathcastle.profiles', []);
   if (!names.some((n) => n.toLowerCase() === name.toLowerCase())) store.set('mathcastle.profiles', [...names, name]);
@@ -480,7 +496,8 @@ function start(vr) {
   if (!opts) return;
   $('setup').style.display = 'none';
   preview.dispose();
-  const game = window.__castle = new Game(opts);
+  if (opts.mode === 'kingdom') opts.xrMode = arOK ? 'immersive-ar' : 'immersive-vr';
+  const game = window.__castle = new (opts.mode === 'kingdom' ? Kingdom : Game)(opts);
   game.onPlayAgain = () => { sessionStorage.setItem('mathcastle.autostart', vr ? 'vr' : 'desk'); location.reload(); };
   game.onExitVR = () => { $('hud').style.display = 'block'; $('deskHelp').style.display = 'block'; $('crosshair').style.display = 'block'; };
   const returnToSetup = (message) => { sessionStorage.setItem('mathcastle.notice', message); location.reload(); };
@@ -543,9 +560,9 @@ if (qp) {
 if (!$('homework').value) fetch('homework.txt').then((r) => (r.ok ? r.text() : '')).then((t) => { if (t && !$('homework').value) { $('homework').value = t; checkHomework(); } }).catch(() => {});
 
 if (navigator.xr) {
-  navigator.xr.isSessionSupported('immersive-vr').then((ok) => {
-    for (const id of ['vrBtn', 'quickVr']) { $(id).disabled = !ok; $(id).textContent = ok ? '🥽 Enter the Castle in VR' : 'VR not available here'; }
-    if (!ok) $('vrNote').textContent = 'Open this page in the Meta Quest browser to play in VR.';
+  Promise.all(['immersive-vr', 'immersive-ar'].map((m) => navigator.xr.isSessionSupported(m).catch(() => false))).then(([vr, ar]) => {
+    vrOK = vr; arOK = ar; updateVrButtons();
+    if (!vr && !ar) $('vrNote').textContent = 'Open this page in the Meta Quest browser to play in VR.';
   });
 } else {
   $('vrBtn').textContent = $('quickVr').textContent = 'VR not available here';
