@@ -191,10 +191,12 @@
     </label>
     <label>Play area
       <select id="roomSize">
-        <option value="2">2 m × 2 m (6.5 ft)</option><option value="2.5" selected>2.5 m × 2.5 m (8 ft)</option><option value="3">3 m × 3 m (10 ft)</option><option value="3.5">3.5 m × 3.5 m (11.5 ft)</option><option value="4">4 m × 4 m (13 ft)</option>
+        <option value="room" selected>My whole room: measure it in the headset (recommended)</option>
+        <option value="2">2 m × 2 m (6.5 ft)</option><option value="2.5">Fixed 2.5 m × 2.5 m (8 ft)</option><option value="3">3 m × 3 m (10 ft)</option><option value="3.5">3.5 m × 3.5 m (11.5 ft)</option><option value="4">4 m × 4 m (13 ft)</option>
         <option value="auto">Try automatic Guardian fit (experimental)</option>
       </select>
     </label>
+    <label id="remeasureRow"><input type="checkbox" id="remeasure"> Measure the room again next time (after moving furniture or redrawing the boundary)</label>
     <label><input type="checkbox" id="autoRead"> Read each problem aloud automatically (great for younger readers)</label>
     <label>Music
       <select id="music"><option value="0">Off</option><option value="0.35" selected>Soft</option><option value="0.6">Medium</option><option value="1">Loud</option></select>
@@ -296,7 +298,8 @@ function loadProfile(name) {
   if (!s.avatar?.identity) avatar.identity = identityForName(s.name, familyNames()) || 'custom';
   renderAvatarPicker(); $('music').value = String(s.music ?? 0.35);
   $('autoRead').checked = s.autoRead ?? s.grade === 2;
-  $('perDoor').value = String(s.perDoor || 2); $('roomSize').value = s.roomSize || '2.5';
+  // the old 2.5 m default becomes full-room play; deliberate other sizes stay
+  $('perDoor').value = String(s.perDoor || 2); $('roomSize').value = !s.roomSize || (s.roomSize === '2.5' && !s.roomChosen) ? 'room' : s.roomSize;
   setGrade(s.grade, s.moduleIds);
   renderResume(); $('report').innerHTML = ''; $('missedToHw').style.display = 'none'; $('booklet').innerHTML = ''; $('bookletNote').textContent = '';
 }
@@ -319,8 +322,8 @@ function collect() {
   const { problems: hw, errors } = parseHomework($('homework').value, grade);
   if (errors.length) { alert(`Please fix the homework before starting:\n${errors.join('\n')}`); return null; }
   if ($('hwOnly').checked && !hw.length) { alert('Add at least one valid homework problem for this grade, or turn off homework only.'); return null; }
-  const settings = { name, grade, moduleIds, perDoor: Number($('perDoor').value), roomSize: $('roomSize').value, avatar: { ...avatar }, music: Number($('music').value), autoRead: $('autoRead').checked, homework: $('homework').value, homeworkOnly: $('hwOnly').checked };
-  store.set(profileKey(name), settings);
+  const settings = { name, grade, moduleIds, perDoor: Number($('perDoor').value), roomSize: $('roomSize').value, roomChosen: true, remeasure: $('remeasure').checked, avatar: { ...avatar }, music: Number($('music').value), autoRead: $('autoRead').checked, homework: $('homework').value, homeworkOnly: $('hwOnly').checked };
+  store.set(profileKey(name), { ...settings, remeasure: false }); // re-measuring is a one-off
   const names = store.get('mathcastle.profiles', []);
   if (!names.some((n) => n.toLowerCase() === name.toLowerCase())) store.set('mathcastle.profiles', [...names, name]);
   store.set('mathcastle.last', name);
@@ -517,7 +520,7 @@ if (qp) {
   if (FAMILY[look] && !familyNames()[look]) { store.set('mathcastle.family', { ...familyNames(), [look]: qp }); renderFamilyNames(); renderFamily(); }
   if (!store.get(profileKey(qp), null) && (qg === 2 || qg === 4)) {
     const fid = identityForName(qp, familyNames());
-    store.set(profileKey(qp), { name: qp, grade: qg, moduleIds: MODULES[qg].map((m) => m.id), perDoor: 2, roomSize: '2.5', homework: '', homeworkOnly: false, ...(fid ? { avatar: familyDefaults(fid) } : {}) });
+    store.set(profileKey(qp), { name: qp, grade: qg, moduleIds: MODULES[qg].map((m) => m.id), perDoor: 2, roomSize: 'room', homework: '', homeworkOnly: false, ...(fid ? { avatar: familyDefaults(fid) } : {}) });
     const names = store.get('mathcastle.profiles', []);
     if (!names.some((n) => n.toLowerCase() === qp.toLowerCase())) store.set('mathcastle.profiles', [...names, qp]);
     renderProfiles();

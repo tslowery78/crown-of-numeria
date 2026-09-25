@@ -26,7 +26,8 @@ const FLOORS = [
 ];
 const TOP = FLOORS.length - 1;
 const fy = (i) => i * FH;
-const ROOM_MIN = 1.6, ROOM_MAX = 5, EDGE_MARGIN = 0.15;
+const ROOM_MIN = 1.6, ROOM_MAX = 8, EDGE_MARGIN = 0.15;
+const ROOM_KEY = 'mathcastle.room.v1'; // measured room, stored in the Guardian-anchored space
 const TREASURES = [
   ['Ruby', 0xe0115f], ['Sapphire', 0x2a6cff], ['Emerald', 0x1fc46b], ['Amethyst', 0x9b4dff], ['Golden Star', 0xffc629],
 ];
@@ -409,7 +410,7 @@ export class Game {
     this.renderer.setAnimationLoop((time, frame) => this.frame(frame));
   }
 
-  presetSize() { const n = parseFloat(this.opts.roomSize); return Number.isFinite(n) ? n : 2.5; }
+  presetSize() { const n = parseFloat(this.opts.roomSize); return Number.isFinite(n) ? n : this.opts.roomSize === 'room' ? 3.5 : 2.5; }
 
   startDesktop() {
     const s = this.presetSize();
@@ -422,8 +423,18 @@ export class Game {
     const session = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking'] });
     this.xrBoundsSpace = null; this.xrReset = false;
     try {
-      let type = 'local-floor', w = this.presetSize(), d = w, cx = 0, cz = 0;
-      if (this.opts.roomSize === 'auto') {
+      let type = 'local-floor', w = this.presetSize(), d = w, cx = 0, cz = 0, frame = null;
+      this.roomMode = this.opts.roomSize === 'room';
+      if (this.roomMode) {
+        // Full-room play: measure the clear space by walking its corners. In the Guardian-anchored
+        // 'bounded-floor' space the measurement stays valid next time, so it is saved.
+        let space = null;
+        try { space = await session.requestReferenceSpace('bounded-floor'); } catch { /* local-floor only */ }
+        type = space ? 'bounded-floor' : 'local-floor';
+        this.xrBoundsSpace = space;
+        let saved = null; try { saved = JSON.parse(localStorage.getItem(ROOM_KEY)); } catch { /* none */ }
+        if (space && saved?.type === 'bounded-floor' && !this.opts.remeasure) { w = saved.w; d = saved.d; frame = saved; }
+      } else if (this.opts.roomSize === 'auto') {
         let space;
         try { space = await session.requestReferenceSpace('bounded-floor'); }
         catch { throw new Error('Guardian bounds are unavailable. Choose a measured play-area size.'); }
@@ -436,9 +447,13 @@ export class Game {
       }
       this.fitInfo = { type, w, d };
       this.renderer.xr.setReferenceSpaceType(type);
-      this.buildWorld(w, d);
-      this.rig.rotation.set(0, 0, 0); this.rig.position.set(-cx, fy(this.level), -cz);
-      this.xrCalibrating = type === 'local-floor';
+      if (this.roomMode && !frame) { this.beginMeasure(type, false); }
+      else {
+        this.buildWorld(w, d);
+        this.rig.rotation.set(0, 0, 0); this.rig.position.set(-cx, fy(this.level), -cz);
+        if (frame) this.setRoomFrame({ x: frame.cx, z: frame.cz }, { x: frame.fx, z: frame.fz });
+      }
+      this.xrCalibrating = type === 'local-floor' && !this.roomMode;
       this.camera.position.set(0, 0, 0); this.camera.rotation.set(0, 0, 0);
       await this.renderer.xr.setSession(session);
       // Use the exact bounded space whose geometry was fitted.
@@ -450,6 +465,10 @@ export class Game {
       // her progress and keep the castle on the same physical spot: apply the reset transform, or,
       // if the headset gives none, ask her to walk back to the middle. Guardian-fit mode restarts.
       const reset = (ev) => {
+        if (this.roomMode) { // keep the castle on the measured floor: use the transform, or re-mark the front wall
+          if (ev?.transform) this.applyResetTransform(ev.transform); else this.beginMeasure(type, true);
+          return;
+        }
         if (type !== 'local-floor') { this.xrReset = true; session.end().catch(() => {}); return; }
         if (ev?.transform) this.applyResetTransform(ev.transform);
         else this.askForCenter();
@@ -490,6 +509,108 @@ export class Game {
   confirmCenter() {
     this.centerPrompt = false; this.xrCalibrating = true;
     if (this.centerSign) this.scene.remove(this.centerSign);
+  }
+
+  // Map the measured room onto the game: centre `c` (reference-space x/z) becomes the world
+  // origin and `fwd` (towards the Magic Lock wall) becomes -Z. Height stays with the floor.
+  setRoomFrame(c, fwd) {
+    const yaw = Math.atan2(-fwd.x, -fwd.z);
+    this.rig.rotation.set(0, -yaw, 0);
+    const s = new THREE.Vector3(c.x, 0, c.z).applyAxisAngle(new THREE.Vector3(0, 1, 0), -yaw);
+    this.rig.position.set(-s.x, fy(this.level ?? 0), -s.z);
+    this.rig.updateMatrixWorld(true);
+  }
+
+  // Walk-the-corners room measuring. reanchor = keep the current room size and only re-mark
+  // the front wall (after a recenter that gave no reset transform).
+  beginMeasure(type, reanchor) {
+    this.roomMeasure = { type, reanchor, points: [], msg: '' };
+    this.rig.position.set(0, 0, 0); this.rig.rotation.set(0, 0, 0); this.rig.updateMatrixWorld(true);
+    if (this.world) this.world.visible = false;
+    if (!this.measureGroup) {
+      const g = this.measureGroup = new THREE.Group();
+      const grid = new THREE.GridHelper(16, 32, 0x8a7bd8, 0x3a3060); grid.material.transparent = true; grid.material.opacity = 0.6; g.add(grid);
+      g.add(new THREE.HemisphereLight(0xffffff, 0x333344, 2));
+      this.measureMarks = new THREE.Group(); g.add(this.measureMarks);
+      this.measureRect = new THREE.Line(new THREE.BufferGeometry().setFromPoints(Array.from({ length: 5 }, () => new THREE.Vector3())), new THREE.LineBasicMaterial({ color: 0xffd54a, toneMapped: false }));
+      this.measureRect.frustumCulled = false; g.add(this.measureRect);
+      this.measureFill = new THREE.Mesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xffd54a, transparent: true, opacity: 0.12, side: THREE.DoubleSide, depthWrite: false, toneMapped: false }));
+      g.add(this.measureFill);
+    }
+    this.measureMarks.clear(); this.measureRect.visible = false; this.measureFill.visible = false;
+    this.scene.add(this.measureGroup);
+    this.scene.background = new THREE.Color(0x120c1c);
+    this.updateMeasureSign();
+  }
+  measureStepText() {
+    const m = this.roomMeasure, n = m.points.length;
+    const steps = ['Walk to the FRONT-LEFT corner of your clear space (the wall where the Magic Lock will go). Pull the trigger or pinch.',
+      'Now walk to the FRONT-RIGHT corner and pull the trigger or pinch.',
+      'Now walk to the BACK of your space and pull the trigger or pinch.'];
+    return (m.msg ? m.msg + '\n' : '') + (m.reanchor && n === 0 ? 'The castle moved. ' : '') + steps[n];
+  }
+  updateMeasureSign() {
+    if (this.measureSign) { this.scene.remove(this.measureSign); this.measureSign.material.map.dispose(); }
+    this.measureSign = makeSign(this.measureStepText(), { w: 1.0, h: 0.42, size: 64, bg: '#1f2a44', border: '#ffd54a', fg: '#ffffff' });
+    this.scene.add(this.measureSign);
+  }
+  // Where a pointer marks the floor: the controller (or pinch) position dropped to the floor.
+  markPoint(ptr) { const p = this.holdPoint(ptr); return new THREE.Vector3(p.x, 0, p.z); }
+  measureGeometry(A, B, C) {
+    const u = B.clone().sub(A); const W = u.length(); u.normalize();
+    let n = new THREE.Vector3(-u.z, 0, u.x); if (C.clone().sub(A).dot(n) < 0) n.negate();
+    const D = C.clone().sub(A).dot(n);
+    return { u, n, W, D, center: A.clone().addScaledVector(u, W / 2).addScaledVector(n, D / 2), fwd: n.clone().negate() };
+  }
+  markCorner(ptr) {
+    const m = this.roomMeasure; if (!m) return;
+    const p = this.markPoint(ptr);
+    if (m.points.some((q) => q.distanceTo(p) < 0.4)) return; // double press
+    m.points.push(p); m.msg = '';
+    this.audio.resume(); this.audio.click(); this.haptic(ptr, 0.6, 60);
+    const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 1.6, 12), new THREE.MeshBasicMaterial({ color: 0xffd54a, toneMapped: false }));
+    pillar.position.set(p.x, 0.8, p.z); this.measureMarks.add(pillar);
+    const need = m.reanchor ? 2 : 3;
+    if (m.points.length < need) { this.updateMeasureSign(); return; }
+    const [A, B] = m.points;
+    // re-anchoring keeps the size; the back side is wherever she is standing now
+    const C = m.reanchor ? this.headPos().setY(0) : m.points[2];
+    const geo = this.measureGeometry(A, B, C);
+    let W = geo.W - 0.2, D = m.reanchor ? this.D : geo.D - 0.2; // 10 cm inside each marked edge
+    if (m.reanchor) { W = this.W; geo.center = A.clone().addScaledVector(geo.u, geo.W / 2).addScaledVector(geo.n, D / 2 + 0.1); }
+    if (W < ROOM_MIN || D < ROOM_MIN) {
+      m.points = []; this.measureMarks.clear();
+      m.msg = `That space is ${Math.max(0, W).toFixed(1)} × ${Math.max(0, D).toFixed(1)} m; the castle needs at least ${ROOM_MIN} × ${ROOM_MIN} m. Let's try again.`;
+      this.audio.wrong(); this.updateMeasureSign(); return;
+    }
+    W = Math.min(W, ROOM_MAX); D = Math.min(D, ROOM_MAX);
+    this.finishMeasure(m, W, D, geo.center, geo.fwd);
+  }
+  finishMeasure(m, W, D, center, fwd) {
+    this.scene.remove(this.measureGroup); if (this.measureSign) this.scene.remove(this.measureSign);
+    this.scene.background = new THREE.Color(0xbfe3ff);
+    if (m.type === 'bounded-floor') { try { localStorage.setItem(ROOM_KEY, JSON.stringify({ type: m.type, cx: center.x, cz: center.z, fx: fwd.x, fz: fwd.z, w: W, d: D, at: Date.now() })); } catch { /* ignore */ } }
+    if (!m.reanchor) { this.fitInfo = { type: m.type, w: W, d: D }; this.buildWorld(W, D); }
+    this.world.visible = true;
+    this.roomMeasure = null;
+    this.setRoomFrame(center, fwd);
+    this.audio.cueArrive('castle');
+    this.welcomeBack = false;
+    this.showBanner(m.reanchor ? 'Back in the castle!' : `Your castle: ${W.toFixed(1)} × ${D.toFixed(1)} m`);
+  }
+  updateMeasure() {
+    const m = this.roomMeasure, head = this.headPos(), fwd = new THREE.Vector3();
+    this.camera.getWorldDirection(fwd); fwd.y = 0; if (fwd.lengthSq() < 1e-4) fwd.set(0, 0, -1); fwd.normalize();
+    this.measureSign.position.copy(head).addScaledVector(fwd, 1.1); this.measureSign.position.y = head.y - 0.1; this.measureSign.lookAt(head);
+    // live outline: front edge, then the room growing as she walks back
+    if (!m.reanchor && m.points.length === 2) {
+      const live = this.pointers.find((p) => p.src) ? this.markPoint(this.pointers.find((p) => p.src)) : head.clone().setY(0);
+      const g = this.measureGeometry(m.points[0], m.points[1], live), [A, B] = m.points;
+      const pts = [A, B, B.clone().addScaledVector(g.n, g.D), A.clone().addScaledVector(g.n, g.D), A].map((v) => v.clone().setY(0.02));
+      this.measureRect.geometry.setFromPoints(pts); this.measureRect.visible = true;
+      this.measureFill.visible = g.D > 0.1; this.measureFill.position.copy(g.center).setY(0.01);
+      this.measureFill.scale.set(g.W, 1, Math.max(0.01, g.D)); this.measureFill.rotation.y = Math.atan2(-g.u.z, g.u.x);
+    } else this.measureRect.visible = this.measureFill.visible = false;
   }
 
   calibrateXR(pose) {
@@ -1440,7 +1561,7 @@ export class Game {
         if (e.data.handedness === 'left' && !e.data.hand) c.add(this.hudMesh);
       });
       c.addEventListener('disconnected', () => { ptr.src = null; dot.visible = false; if (ptr.holding) this.drop(ptr); });
-      c.addEventListener('selectstart', () => { if (this.centerPrompt) return this.confirmCenter(); if (!this.tryGrab(ptr)) this.select(ptr); else ptr.grabBy = 'select'; });
+      c.addEventListener('selectstart', () => { if (this.roomMeasure) return this.markCorner(ptr); if (this.centerPrompt) return this.confirmCenter(); if (!this.tryGrab(ptr)) this.select(ptr); else ptr.grabBy = 'select'; });
       c.addEventListener('selectend', () => { if (ptr.rayDrawing) { ptr.rayDrawing = false; this.scroll?.lift(ptr); } if ((ptr.holding || ptr.holdingTray) && ptr.grabBy === 'select') this.drop(ptr); });
       c.addEventListener('squeezestart', () => { if (this.tryGrab(ptr)) ptr.grabBy = 'squeeze'; });
       c.addEventListener('squeezeend', () => { if ((ptr.holding || ptr.holdingTray) && ptr.grabBy === 'squeeze') this.drop(ptr); });
@@ -1675,6 +1796,7 @@ export class Game {
   // ---------------------------------------------------------- frame loop
   frame(xrFrame) {
     const dt = Math.min(this.clock.getDelta(), 0.05), t = this.clock.elapsedTime;
+    if (this.roomMeasure) { if (this.renderer.xr.isPresenting) this.renderer.xr.updateCamera(this.camera); this.updateMeasure(); this.renderer.render(this.scene, this.camera); return; }
     if (!this.world) { this.renderer.render(this.scene, this.camera); return; }
     const xr = this.renderer.xr.isPresenting;
     if (xr && this.xrReset) return;
