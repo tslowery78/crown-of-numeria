@@ -10,6 +10,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { Game, Panel, makeSign, canvasTexture, roundRect, drawGem, FONT, clamp } from './game.js';
 import { ProblemSource } from './problems.js';
 import { GemTray } from './tray.js';
@@ -18,6 +19,8 @@ import { makeDragon } from './props.js';
 
 const CELL = 0.2, R = 0.86, TOPY = 0.55, QUEST = 5; // metres: grid cell, island radius, island top height
 const PLAYER_Z = 1.45; // where she stands, in kingdom coordinates (the island centre is the origin)
+const VISIT = 8; // "Shrink down!": the kingdom grows 8x, so a cottage is house-sized and villagers are her height
+const PEOPLE = ['female-a', 'male-a', 'female-b', 'male-c', 'female-d', 'male-e'];
 const KEY = (player) => `mathcastle.kingdom.${player}`;
 
 // ------------------------------------------------------------------ kit
@@ -26,6 +29,13 @@ export function loadKit() {
   return (kitPromise ??= new GLTFLoader().loadAsync(new URL('../assets/kingdom/kingdom.glb', import.meta.url).href)
     .then((g) => Object.fromEntries(g.scenes.map((s) => [s.name, s])))
     .catch((e) => { console.warn('kingdom kit failed', e?.message || e); return {}; }));
+}
+
+// Villagers: Kenney Mini Characters (CC0), skinned with walk / idle / wave animations.
+let peoplePromise = null;
+export function loadPeople() {
+  return (peoplePromise ??= Promise.all(PEOPLE.map((n) => new GLTFLoader().loadAsync(new URL(`../assets/kingdom/people/${n}.glb`, import.meta.url).href).catch(() => null)))
+    .then((list) => list.filter(Boolean)));
 }
 
 // Seeded random so a saved building rebuilds identically.
@@ -94,7 +104,8 @@ function flatten(root) {
 export class Kingdom extends Game {
   constructor(opts) {
     super({ ...opts, mode: 'kingdom' });
-    this.kitReady = loadKit().then((k) => (this.kit = k));
+    this.kitReady = Promise.all([loadKit(), loadPeople()]).then(([k, p]) => { this.kit = k; this.people = p; });
+    this.renderer.shadowMap.enabled = true; this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   }
 
   async startDesktop() {
@@ -153,7 +164,10 @@ export class Kingdom extends Game {
     this.panelH = 1.0;
 
     this.world.add(new THREE.HemisphereLight(0xfff6e6, 0x6f7f5a, 1.3));
-    const sun = new THREE.DirectionalLight(0xffffff, 1.7); sun.position.set(1.5, 3, 2); this.world.add(sun);
+    // one shadow-casting sun: the buildings and villagers cast real shadows on the island
+    const sun = this.sun = new THREE.DirectionalLight(0xfff2dc, 2.0); sun.position.set(1.2, 3, 1.6); this.world.add(sun); this.world.add(sun.target);
+    sun.castShadow = true; sun.shadow.mapSize.set(1024, 1024); sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.01; sun.shadow.radius = 3;
+    this.fitShadow(1);
     this.buildIsland();
     this.buildShop();
     // the Magic Lock panel becomes the Wizard's quest board, to her front-left
@@ -166,6 +180,7 @@ export class Kingdom extends Game {
     this.scroll = new MagicScroll(this); this.world.add(this.scroll.group); this.scroll.place(0, 0, 2.6, this.D, this.panelH);
     this.layoutStation();
     for (const b of save.built || []) this.placeBuilding(b, false);
+    this.villagers = []; this.visiting = false; this.syncVillagers();
     this.makeWelcomeSign(save);
     panel.activate();
     this.updateHud();
@@ -191,7 +206,7 @@ export class Kingdom extends Game {
       for (let k = 0; k < 60; k++) { c.fillStyle = ['#fff6a8', '#ffd1e8', '#ffffff'][k % 3]; c.beginPath(); c.arc(Math.random() * w, Math.random() * h, 3, 0, 7); c.fill(); }
     });
     this.islandTop = new THREE.Mesh(new THREE.CircleGeometry(R, 72).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ map: grass, roughness: 0.95 }));
-    island.add(this.islandTop);
+    this.islandTop.receiveShadow = true; island.add(this.islandTop);
     // earth rim and a rocky underside that tapers to a point, like a floating sky island
     island.add(new THREE.Mesh(new THREE.CylinderGeometry(R, R * 0.96, 0.07, 72, 1, true).translate(0, -0.035, 0), new THREE.MeshStandardMaterial({ color: 0x7a5534, roughness: 1, side: THREE.DoubleSide })));
     const rock = new THREE.ConeGeometry(R * 0.96, TOPY - 0.12, 28, 6).rotateX(Math.PI).translate(0, -0.07 - (TOPY - 0.12) / 2, 0), p = rock.attributes.position, cols = [];
@@ -254,11 +269,14 @@ export class Kingdom extends Game {
     hit.position.y = size.y / 2; root.add(hit);
     root.position.copy(this.cellCentre(i, j, foot)); root.rotation.y = rot * Q;
     this.island.add(root);
-    const b = { id, i, j, rot, seed, foot, root, model, hit, spin: [] };
+    model.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+    blob.material = this.blobMat; blob.scale.setScalar(0.8);
+    const b = { id, i, j, rot, seed, foot, root, model, hit, spin: [], smoke: ['cottage', 'house'].includes(id) ? this.makeSmoke(root, id) : null };
     model.traverse((o) => { if (o.userData.spin) b.spin.push(o); });
     hit.userData.building = b;
     for (const [a, c] of this.footCells(i, j, foot)) this.occupied.set(`${a},${c}`, b);
     this.buildings.push(b);
+    if (fresh) this.syncVillagers();
     if (fresh) {
       model.scale.setScalar(0.001);
       this.animate(0.5, (t) => { const s = t < 0.7 ? t / 0.7 * 1.15 : 1.15 - (t - 0.7) / 0.3 * 0.15; model.scale.setScalar(CELL * Math.max(0.001, s)); });
@@ -271,6 +289,148 @@ export class Kingdom extends Game {
     for (const [a, c] of this.footCells(b.i, b.j, b.foot)) this.occupied.delete(`${a},${c}`);
     this.buildings = this.buildings.filter((x) => x !== b);
     this.island.remove(b.root);
+  }
+
+  // Chimney smoke: a few soft puffs rising from the chimney, recycled.
+  makeSmoke(root, id) {
+    this.smokeMat ??= new THREE.SpriteMaterial({ map: canvasTexture(64, 64, (c, w) => { const g = c.createRadialGradient(w / 2, w / 2, 2, w / 2, w / 2, w / 2); g.addColorStop(0, 'rgba(255,255,255,0.8)'); g.addColorStop(1, 'rgba(255,255,255,0)'); c.fillStyle = g; c.fillRect(0, 0, w, w); }), transparent: true, depthWrite: false, opacity: 0.6 });
+    const top = id === 'cottage' ? new THREE.Vector3(0.32, 2.0, -0.2) : new THREE.Vector3(0.32, 3.05, -0.2);
+    const puffs = [];
+    for (let k = 0; k < 5; k++) { const sp = new THREE.Sprite(this.smokeMat.clone()); sp.userData.t = k / 5; root.add(sp); puffs.push(sp); }
+    return { puffs, top: top.multiplyScalar(CELL) };
+  }
+  updateSmoke(b, dt) {
+    for (const sp of b.smoke.puffs) {
+      const t = (sp.userData.t = (sp.userData.t + dt * 0.25) % 1);
+      sp.position.copy(b.smoke.top).add(new THREE.Vector3(Math.sin(t * 6) * 0.01, t * 0.22, t * 0.03));
+      sp.scale.setScalar(0.03 + t * 0.07); sp.material.opacity = 0.55 * Math.sin(t * Math.PI);
+    }
+  }
+  fitShadow(scale) {
+    const c = this.sun.shadow.camera, e = (R + 0.3) * scale;
+    c.left = -e; c.right = e; c.top = e; c.bottom = -e; c.near = 0.1 * scale; c.far = 8 * scale; c.updateProjectionMatrix();
+    this.sun.position.set(1.2, 3, 1.6); this.sun.target.position.set(0, TOPY, 0);
+  }
+
+  // ------------------------------------------------------------ villagers
+  syncVillagers() {
+    if (!this.people?.length) return;
+    const want = Math.min(10, 2 + Math.floor(this.buildings.filter((b) => !['tree', 'flowers', 'lantern'].includes(b.id)).length * 0.8));
+    while (this.villagers.length < want) {
+      const k = this.villagers.length, src = this.people[k % this.people.length], o = cloneSkinned(src.scene);
+      o.scale.setScalar(CELL * 0.95); o.traverse((m) => { if (m.isMesh) { m.castShadow = true; m.frustumCulled = false; } });
+      const mixer = new THREE.AnimationMixer(o), clip = (n) => src.animations.find((a) => a.name === n);
+      const acts = Object.fromEntries(['idle', 'walk', 'emote-yes', 'interact-right'].map((n) => [n, clip(n) && mixer.clipAction(clip(n))]));
+      const v = { o, mixer, acts, cur: null, target: null, wait: Math.random() * 2, waveCool: 0 };
+      const p = this.randomSpot(); o.position.set(p.x, 0, p.z); this.island.add(o);
+      this.play(v, 'idle'); this.villagers.push(v);
+    }
+  }
+  play(v, name, once = false) {
+    const a = v.acts[name]; if (!a || v.cur === a) return;
+    a.reset(); a.setLoop(once ? THREE.LoopOnce : THREE.LoopRepeat); a.clampWhenFinished = once; a.fadeIn(0.2).play();
+    v.cur?.fadeOut(0.2); v.cur = a; v.onceLeft = once ? a.getClip().duration : 0;
+  }
+  randomSpot() {
+    for (let k = 0; k < 20; k++) {
+      // wander to the front door of a house, or somewhere open on the grass
+      const houses = this.buildings.filter((b) => !['tree', 'flowers', 'lantern', 'garden'].includes(b.id));
+      let p;
+      if (houses.length && Math.random() < 0.6) { const b = houses[Math.floor(Math.random() * houses.length)]; p = b.root.position.clone().add(new THREE.Vector3(0, 0, CELL * 0.6 * b.foot).applyAxisAngle(new THREE.Vector3(0, 1, 0), b.rot * Q)); }
+      else { const a = Math.random() * TAU, r = Math.sqrt(Math.random()) * (R - 0.12); p = new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r); }
+      if (Math.hypot(p.x, p.z) < R - 0.08 && Math.hypot(p.x + 0.46, p.z + 0.32) > 0.2) return p;
+    }
+    return new THREE.Vector3(0, 0, 0.4);
+  }
+  updateVillagers(dt, head) {
+    const me = this.island.worldToLocal(head.clone());
+    for (const v of this.villagers) {
+      v.mixer.update(dt); v.waveCool -= dt;
+      if (v.onceLeft > 0) { v.onceLeft -= dt; if (v.onceLeft <= 0) this.play(v, 'idle'); continue; }
+      // when she has shrunk down and walks up to a villager, they turn and wave
+      const near = this.visiting && Math.hypot(me.x - v.o.position.x, me.z - v.o.position.z) < 0.3;
+      if (near && v.waveCool <= 0) { v.o.rotation.y = Math.atan2(me.x - v.o.position.x, me.z - v.o.position.z); v.target = null; v.wait = 2; v.waveCool = 12; this.play(v, 'emote-yes', true); continue; }
+      if (!v.target) { v.wait -= dt; if (v.wait <= 0) { v.target = this.randomSpot(); this.play(v, 'walk'); } continue; }
+      const d = v.target.clone().sub(v.o.position); d.y = 0; const dist = d.length(), step = 0.045 * dt; // 0.36 m/s at her size
+      if (dist < step) { v.target = null; v.wait = 1.5 + Math.random() * 4; this.play(v, Math.random() < 0.3 ? 'interact-right' : 'idle', Math.random() < 0.3); continue; }
+      v.o.position.addScaledVector(d, step / dist);
+      const want = Math.atan2(d.x, d.z); let dy = want - v.o.rotation.y; dy = Math.atan2(Math.sin(dy), Math.cos(dy)); v.o.rotation.y += dy * Math.min(1, dt * 6);
+    }
+  }
+
+  // ------------------------------------------------------------ shrink down and visit
+  toggleVisit() { if (this.visiting) this.growBack(); else this.shrinkDown(); }
+  shrinkDown() {
+    if (this.visiting) return;
+    for (const ptr of [...this.pointers, this.desktopPtr]) if (ptr.holding || ptr.holdingTray) this.drop(ptr);
+    const head = this.headPos(), w = this.world;
+    this.visitSave = { pos: w.position.clone(), rig: this.rig.position.clone(), rigYaw: this.rig.rotation.y };
+    // she lands on the front edge of the island, looking in towards the middle
+    const spot = new THREE.Vector3(0, TOPY, R * 0.72).multiplyScalar(VISIT).applyAxisAngle(new THREE.Vector3(0, 1, 0), w.rotation.y);
+    w.scale.setScalar(VISIT);
+    w.position.set(head.x - spot.x, -TOPY * VISIT, head.z - spot.z);
+    for (const o of [this.board.mesh, this.scroll.group, this.tray.group, this.shop.group, this.welcome]) if (o) o.visible = false;
+    this.fitShadow(VISIT);
+    this.visitWorld(true);
+    this.visiting = true;
+    this.audio.cueLift?.(); this.burst(head.clone().add(new THREE.Vector3(0, -0.3, 0)), 50, 0.03, 2);
+    this.showBanner('You shrank down! Walk around your kingdom.');
+  }
+  growBack() {
+    if (!this.visiting) return;
+    const w = this.world, sv = this.visitSave;
+    w.scale.setScalar(1); w.position.copy(sv.pos); this.rig.position.copy(sv.rig); this.rig.rotation.y = sv.rigYaw;
+    for (const o of [this.board.mesh, this.scroll.group, this.tray.group, this.shop.group, this.welcome]) if (o) o.visible = true;
+    this.tray.group.visible = !!this.tray.manip;
+    this.fitShadow(1);
+    this.visitWorld(false);
+    this.visiting = false;
+    this.audio.cueArrive?.('castle');
+  }
+  // sky and meadow around the life-size kingdom (hides the room while she's small), and the "grow back" button
+  visitWorld(on) {
+    if (!this.visitEnv) {
+      const env = this.visitEnv = new THREE.Group();
+      const sky = new THREE.SphereGeometry(80, 32, 16), cols = [], top = new THREE.Color(0x5a9be6), hor = new THREE.Color(0xe6f3ff), pa = sky.attributes.position;
+      for (let k = 0; k < pa.count; k++) { const c = hor.clone().lerp(top, clamp(pa.getY(k) / 80, 0, 1) ** 0.6); cols.push(c.r, c.g, c.b); }
+      sky.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
+      env.add(new THREE.Mesh(sky, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, toneMapped: false, depthWrite: false })));
+      const meadow = new THREE.Mesh(new THREE.CircleGeometry(70, 64).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x5f9e45, roughness: 1 }));
+      meadow.position.y = -0.03; meadow.receiveShadow = true; env.add(meadow);
+      // distant hills so the horizon isn't bare
+      const hillMat = new THREE.MeshStandardMaterial({ color: 0x6fa857, roughness: 1, flatShading: true });
+      for (let k = 0; k < 14; k++) { const a = (k / 14) * TAU, h = new THREE.Mesh(new THREE.SphereGeometry(8 + Math.random() * 6, 12, 8), hillMat); h.scale.y = 0.35; h.position.set(Math.cos(a) * 55, -1, Math.sin(a) * 55); env.add(h); }
+      this.growBtn = makeSign('Grow big again', { w: 0.46, h: 0.1, size: 70, bg: '#2b1a4a', fg: '#ffe9a8' });
+      this.growBtn.userData.button = { action: () => this.growBack() };
+      env.add(this.growBtn);
+      this.scene.add(env);
+    }
+    this.visitEnv.visible = on;
+    // on the desktop there's no passthrough to hide, but the meadow still frames the view
+    if (this.roomFloor) this.roomFloor.visible = !on;
+  }
+  // the "grow back" button floats at her waist, a little ahead, and lazily follows where she looks
+  updateGrowButton(head) {
+    const fwd = new THREE.Vector3(); this.camera.getWorldDirection(fwd); fwd.y = 0; if (fwd.lengthSq() < 1e-4) return; fwd.normalize();
+    const want = head.clone().addScaledVector(fwd, 0.55); want.y = head.y - 0.45;
+    const b = this.growBtn; if (b.position.distanceTo(want) > 0.35 || !b.userData.placed) { b.position.copy(want); b.userData.placed = true; }
+    b.lookAt(head.x, b.position.y, head.z);
+  }
+  // thumbsticks while small: left stick glides, right stick turns in 30-degree steps
+  locomotion(dt) {
+    for (const ptr of this.pointers) {
+      const gp = ptr.src?.gamepad; if (!gp || ptr.src.hand) continue;
+      const ax = gp.axes, x = ax[2] ?? 0, y = ax[3] ?? 0;
+      if (ptr.src.handedness === 'left' && Math.hypot(x, y) > 0.2) {
+        const fwd = new THREE.Vector3(); this.camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
+        const right = new THREE.Vector3(-fwd.z, 0, fwd.x);
+        this.rig.position.addScaledVector(fwd, -y * 1.6 * dt).addScaledVector(right, x * 1.6 * dt);
+      }
+      if (ptr.src.handedness === 'right') {
+        if (Math.abs(x) > 0.7 && !ptr.turned) { ptr.turned = true; const head = this.headPos(), a = -Math.sign(x) * Math.PI / 6; this.rig.position.sub(head).applyAxisAngle(new THREE.Vector3(0, 1, 0), a).add(head); this.rig.rotation.y += a; }
+        if (Math.abs(x) < 0.3) ptr.turned = false;
+      }
+    }
   }
 
   // ------------------------------------------------------------ shop
@@ -303,7 +463,10 @@ export class Kingdom extends Game {
     const move = makeSign('Move my kingdom here', { w: 0.42, h: 0.08, size: 60, bg: '#2b1a4a', fg: '#ffe9a8' });
     move.position.set(0, -H / 2 - 0.07, 0); shop.group.add(move);
     move.userData.button = { action: () => { this.placePending = true; this.audio.click(); } };
-    this.moveBtn = move; this.buttons = [move];
+    const shrink = makeSign('Shrink down and visit!', { w: 0.42, h: 0.08, size: 60, bg: '#1f6b3a', fg: '#ffffff' });
+    shrink.position.set(0, -H / 2 - 0.17, 0); shop.group.add(shrink);
+    shrink.userData.button = { action: () => this.shrinkDown() };
+    this.moveBtn = move; this.shrinkBtn = shrink; this.buttons = [move, shrink];
     this.world.add(shop.group);
     this.drawShop();
   }
@@ -408,7 +571,7 @@ export class Kingdom extends Game {
     return { ...this.snap(l2, foot, ignore), local: l2 };
   }
   tryGrab(ptr) {
-    if (ptr.holding || ptr.holdingTray) return false;
+    if (ptr.holding || ptr.holdingTray || this.visiting) return false;
     this.audio.resume();
     const p = this.holdPoint(ptr), v = new THREE.Vector3();
     if (this.tray?.grabAt(p, this.holder(ptr))) { ptr.holdingTray = true; this.haptic(ptr, 0.3, 20); return true; }
@@ -448,6 +611,11 @@ export class Kingdom extends Game {
   castFrom(origin, dir) {
     this.raycaster.set(origin, dir);
     const t = [];
+    if (this.visiting) { // small and walking about: the only thing to press is "grow big again"
+      const h = this.raycaster.intersectObject(this.growBtn, false)[0];
+      return h ? { type: 'button', button: this.growBtn.userData.button, point: h.point, distance: h.distance } : null;
+    }
+    t.push(this.shrinkBtn);
     for (const p of this.panels) if (p.mesh.visible) t.push(p.mesh);
     if (this.tray) t.push(...this.tray.pickables());
     if (this.scroll) t.push(this.scroll.mesh);
@@ -481,6 +649,7 @@ export class Kingdom extends Game {
     const h = ptr.hit;
     if (h?.type === 'shop') return this.pickFromShop(ptr, h.item);
     if (h?.type === 'building') return this.pickBuilding(ptr, h.b);
+    if (h?.type === 'button') return h.button.action();
     this.select(ptr);
   }
   showBanner(text) {
@@ -523,13 +692,14 @@ export class Kingdom extends Game {
     const xr = this.renderer.xr.isPresenting;
     if (xr) { this.rig.updateMatrixWorld(true); this.renderer.xr.updateCamera(this.camera); }
     let head = this.headPos();
-    if (xr && this.placePending && head.y > 0.5) this.anchorInFront(head);
+    if (xr && this.placePending && head.y > 0.5) { if (this.visiting) this.growBack(); this.anchorInFront(head); }
     if (!xr) {
       const f = (this.keys.has('w') || this.keys.has('arrowup') ? 1 : 0) - (this.keys.has('s') || this.keys.has('arrowdown') ? 1 : 0);
       const s = (this.keys.has('d') ? 1 : 0) - (this.keys.has('a') ? 1 : 0);
       if (this.keys.has('arrowleft')) this.camera.rotation.y += 1.8 * dt;
       if (this.keys.has('arrowright')) this.camera.rotation.y -= 1.8 * dt;
-      if (f || s) { const yaw = this.camera.rotation.y, sp = 1.2 * dt; this.rig.position.x = clamp(this.rig.position.x + (-Math.sin(yaw) * f + Math.cos(yaw) * s) * sp, -3, 3); this.rig.position.z = clamp(this.rig.position.z + (-Math.cos(yaw) * f - Math.sin(yaw) * s) * sp, -3, 3); }
+      if (f || s) { const yaw = this.camera.rotation.y, sp = (this.visiting ? 2.5 : 1.2) * dt, m = this.visiting ? 40 : 3; this.rig.position.x = clamp(this.rig.position.x + (-Math.sin(yaw) * f + Math.cos(yaw) * s) * sp, -m, m); this.rig.position.z = clamp(this.rig.position.z + (-Math.cos(yaw) * f - Math.sin(yaw) * s) * sp, -m, m); }
+      if (this.keys.has('v')) { this.keys.delete('v'); this.toggleVisit(); }
       head = this.headPos();
     }
     // quest board, scroll, tray and shop follow her eye height (taller grown-ups, shorter girls)
@@ -552,8 +722,11 @@ export class Kingdom extends Game {
       this.ghost.material.color.setHex(tg.ok ? 0x4dff9a : 0xff5c5c);
     }
     this.tray?.updateHeld(); this.scroll?.update(dt);
+    if (this.visiting) this.scroll.group.visible = false; // the scroll shows itself every frame; keep it away while she's small
     // life: spinning windmills, drifting sparkles, the shop's affordable items bob, visiting dragons
-    for (const b of this.buildings) for (const s of b.spin) s.rotation.x += dt * 1.2;
+    for (const b of this.buildings) { for (const s of b.spin) s.rotation.x += dt * 1.2; if (b.smoke) this.updateSmoke(b, dt); }
+    this.updateVillagers(dt, head);
+    if (this.visiting) { this.updateGrowButton(head); if (xr) this.locomotion(dt); }
     const sp = this.sparkles.geometry.attributes.position;
     for (let k = 0; k < sp.count; k++) { let y = sp.getY(k) + dt * 0.04; if (y > -0.02) y = -TOPY; sp.setY(k, y); }
     sp.needsUpdate = true;

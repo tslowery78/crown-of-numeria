@@ -157,6 +157,11 @@ const url=process.argv[2]||'http://127.0.0.1:8765/';
    return r;});
   assert.ok(kingdom.pieces>=50,'kit pieces '+kingdom.pieces);assert.equal(kingdom.afterSolve,kingdom.start+3);
   assert.equal(kingdom.cottage,true);assert.equal(kingdom.gemsAfterBuy,kingdom.afterSolve-3);assert.equal(kingdom.onTaken,false);assert.equal(kingdom.onPond,false);assert.ok(kingdom.visibleMeshes>0);
+  // "Shrink down": the kingdom grows 8x with its island top on her floor, the station hides, and growing back restores it all.
+  Object.assign(kingdom,await page.evaluate(async()=>{const g=__castle,T=await import('three'),before=g.world.position.clone();g.shrinkDown();await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+   const top=g.islandTop.getWorldPosition(new T.Vector3()),r={shrunkScale:g.world.scale.x,islandTopY:+top.y.toFixed(3),scrollHidden:!g.scroll.group.visible,shopHidden:!g.shop.group.visible,villagers:g.villagers.length};
+   g.growBack();r.back=g.world.scale.x===1&&g.world.position.distanceTo(before)<1e-9&&g.shop.group.visible;return r;}));
+  assert.equal(kingdom.shrunkScale,8);assert.equal(kingdom.islandTopY,0);assert.ok(kingdom.scrollHidden&&kingdom.shopHidden);assert.ok(kingdom.villagers>=2);assert.equal(kingdom.back,true);
   await page.reload();await page.locator('#deskBtn').click();await page.waitForFunction(()=>window.__castle?.shop&&window.__castle.buildings);
   kingdom.restored=await page.evaluate(()=>__castle.buildings.map(b=>b.id).join());assert.equal(kingdom.restored,'cottage');assert.deepEqual(errors,[]);
   const result={url,game,grade4,kingdom,xr,errors,hiddenPreviewDraws:0};
