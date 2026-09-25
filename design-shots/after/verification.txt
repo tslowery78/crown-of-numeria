@@ -1,0 +1,255 @@
+$ npm test
+Exit status: 0
+
+> test
+> node --test tests/problems.test.mjs && node tests/generated-math.mjs
+
+TAP version 13
+# Subtest: mixed numbers, fractions, decimals and signs represent the correct value
+ok 1 - mixed numbers, fractions, decimals and signs represent the correct value
+  ---
+  duration_ms: 0.733292
+  type: 'test'
+  ...
+# Subtest: malformed and nonfinite numeric input is rejected
+ok 2 - malformed and nonfinite numeric input is rejected
+  ---
+  duration_ms: 0.139583
+  type: 'test'
+  ...
+# Subtest: homework answers are enterable and grade sections stay separate
+ok 3 - homework answers are enterable and grade sections stay separate
+  ---
+  duration_ms: 0.661417
+  type: 'test'
+  ...
+# Subtest: homework-only cannot silently fall back to generated practice
+ok 4 - homework-only cannot silently fall back to generated practice
+  ---
+  duration_ms: 0.2095
+  type: 'test'
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 62.487208
+{
+  "samples": 15600,
+  "generators": 78,
+  "mismatches": []
+}
+
+
+$ node tests/browser.cjs http://castle.test/ --files
+Exit status: 0
+{
+  "url": "http://castle.test/",
+  "game": {
+    "initialHomeworkIndex": 1,
+    "deferred": true,
+    "fractionKeys": [
+      "read",
+      "hint",
+      "1",
+      "2",
+      "3",
+      "⌫",
+      "4",
+      "5",
+      "6",
+      "/",
+      "7",
+      "8",
+      "9",
+      ".",
+      "±",
+      "0",
+      "OK"
+    ],
+    "entered": [
+      "First",
+      "Second",
+      "Homework 3",
+      "Homework 4",
+      "Homework 5",
+      "Homework 6",
+      "Homework 7",
+      "Homework 8",
+      "The knights stand in 4 rows.\nThere are 5 knights in each row.\nHow many knights in all?",
+      "You have 86¢. You buy a magic potion for 23¢.\nHow many cents do you have left?",
+      "667 − 608 = ?",
+      "The royal library has 278 books.\nThe wizard brings 235 more books.\nHow many books now?",
+      "A dragon has 5 red eggs and 6 blue eggs.\nHow many eggs in all?"
+    ],
+    "floors": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "correct": 13,
+    "dragon": true,
+    "bowling": [
+      true,
+      true
+    ],
+    "basket": [
+      1,
+      0,
+      1
+    ],
+    "bounce": true,
+    "outside": true,
+    "respawn": true,
+    "helmet": true,
+    "cat": true,
+    "bubble": true,
+    "crystal": true,
+    "owl": true,
+    "planeDistance": 2.522630193667698,
+    "grab": true,
+    "throw": true,
+    "wind": "HRTF"
+  },
+  "grade4": {
+    "level": 6,
+    "correct": 13,
+    "missed": 1,
+    "homeworkOnly": true
+  },
+  "kingdom": {
+    "start": 3,
+    "pieces": 52,
+    "afterSolve": 6,
+    "cottage": true,
+    "gemsAfterBuy": 3,
+    "onTaken": false,
+    "onPond": false,
+    "visibleMeshes": 1,
+    "shrunkScale": 8,
+    "islandTopY": 0,
+    "scrollHidden": true,
+    "shopHidden": true,
+    "villagers": 2,
+    "back": true,
+    "restored": "cottage"
+  },
+  "xr": {
+    "bounds1.4": {
+      "error": "The reported Guardian area is too small for the castle. Choose a measured play-area size or enlarge the clear space.",
+      "ended": true
+    },
+    "bounds0": {
+      "error": "No usable Guardian boundary was returned. Choose a measured play-area size.",
+      "ended": true
+    },
+    "exactSpace": true,
+    "bounds3": {
+      "built": [
+        2.5000000000000004,
+        2.669921875
+      ],
+      "ended": false
+    },
+    "autoReset": {
+      "called": true,
+      "ended": true
+    },
+    "head": [
+      -2.220446049250313e-16,
+      1.2,
+      -1.3877787807814457e-17
+    ],
+    "forward": [
+      0,
+      0,
+      -1
+    ],
+    "liftedHead": [
+      -2.220446049250313e-16,
+      8.4,
+      -1.3877787807814457e-17
+    ],
+    "transformResets": [
+      {
+        "drift": 5.551115123125783e-17,
+        "y": 0,
+        "lift": 0,
+        "called": false,
+        "ended": false,
+        "prompt": false
+      },
+      {
+        "drift": 5.551115123125783e-17,
+        "y": 7.2,
+        "lift": 7.2,
+        "called": false,
+        "ended": false,
+        "prompt": false
+      },
+      {
+        "drift": 1.1102230246251565e-16,
+        "y": 3.6,
+        "lift": 3.6,
+        "called": false,
+        "ended": false,
+        "prompt": false
+      }
+    ],
+    "noTransformReset": {
+      "prompt": true,
+      "called": false,
+      "ended": false,
+      "calibratingBefore": false,
+      "calibratingAfter": true,
+      "promptAfter": false
+    }
+  },
+  "errors": [],
+  "hiddenPreviewDraws": 0
+}
+
+
+$ node tests/kingdom-art.cjs
+Exit status: 0
+{
+  "art": {
+    "loaded": true,
+    "buildings": 13,
+    "normalCalls": 139,
+    "questCalls": 148,
+    "rainbowVisible": true,
+    "dragons": 1,
+    "rainbowExpired": true,
+    "visitCalls": 96,
+    "shadowLights": 1,
+    "liftedShadows": 12,
+    "placedShadows": 13
+  },
+  "fallback": {
+    "allNull": true,
+    "canvasGrass": true,
+    "gradientSky": true,
+    "buildings": 13,
+    "shopBack": true
+  },
+  "errors": []
+}
+
+
+$ ROOT=$PWD node /tmp/pt/kingdom.mjs
+Exit status: 0
+{"gems0":3,"gemsAfter":23,"quests":1,"placed":["cottage:true","tree:true","house:true","windmill:true","tower:true","wizard:true","fountain:true","stall:true","garden:false","flowers:true","camp:true","lantern:true","cart:true","castle:true"],"gemsLeft":11,"n":13,"saved":13,"moved":3,"poor":false}
+visit {"visiting":true,"scale":8,"vill":10,"head":[0.1,1.3,1.95]}
+visitInfo {"calls":99,"tris":41086}
+back {"visiting":false,"scale":1,"shop":true}
+info {"calls":99,"tris":41086}
+restored {"n":13,"gems":11}
+errors: none
