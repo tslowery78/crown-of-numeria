@@ -1141,8 +1141,8 @@ export class Game {
         put('antique_estoc', hw - 0.08, 0.85, { y: 1.1, h: 1.2, rotY: -Math.PI / 2 });
         put('ornate_medieval_mace', hw - 0.08, -0.85, { y: 1.3, h: 0.6, rotY: -Math.PI / 2 });
       }
-      put('wine_barrel_01', -hw + 0.4, -hd + 0.4, { h: 0.85, blob: [0.9, 0.9] });
-      if (hd >= 1.7) put('wine_barrel_01', -hw + 0.4, -hd + 1.18, { h: 0.8, rotY: 1.3, blob: [0.9, 0.9] });
+      // barrels stay off the lock wall: the Magic Scroll fills its left side
+      if (hd >= 1.7) put('wine_barrel_01', -hw + 0.4, hd - 1.15, { h: 0.85, rotY: 1.3, blob: [0.9, 0.9] });
       put('wooden_crate_01', hw - 0.5, -hd + 0.3, { h: 0.34, blob: [0.95, 0.5] });
     }
     if (i === 4) {
@@ -1891,7 +1891,7 @@ export class Game {
           if (!ptr.holding) tips.push({ pos: tip, vel });
         }
         const touch = tip && !ptr.holding && !ptr.holdingTray ? this.poke(ptr, tip, dt) : null;
-        if (tip && !ptr.holding && !ptr.holdingTray) { this.tray?.poke(ptr, tip); this.scroll?.touch(ptr, tip); }
+        if (tip && !ptr.holding && !ptr.holdingTray) { this.tray?.poke(ptr, tip); this.scroll?.touch(ptr.touchKey ??= {}, tip); }
         if (touch) hovered.set(touch.panel, touch.uv);
         tmpM.identity().extractRotation(c.matrixWorld);
         o.setFromMatrixPosition(c.matrixWorld); d.set(0, 0, -1).applyMatrix4(tmpM);

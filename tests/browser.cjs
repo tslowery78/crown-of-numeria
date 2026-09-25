@@ -120,6 +120,12 @@ const url=process.argv[2]||'http://127.0.0.1:8765/';
   assert.deepEqual(xr.autoReset,{called:true,ended:true});
   for(const t of xr.transformResets){assert.ok(t.drift<1e-9,'drift '+t.drift);assert.equal(t.y,t.lift);assert.equal(t.called,false);assert.equal(t.ended,false);assert.equal(t.prompt,false);}
   assert.deepEqual(xr.noTransformReset,{prompt:true,called:false,ended:false,calibratingBefore:false,calibratingAfter:true,promptAfter:false});
+  // Trigger (ray) writing on the Magic Scroll must make one continuous line: the fingertip check that
+  // runs every frame for the same controller must not lift the ray stroke (it used to leave dots).
+  const ink=await page.evaluate(async()=>{const g=__castle,T=await import("three"),s=g.scroll,ptr={};s.floor=g.level;s.clear();
+   for(let k=0;k<20;k++){s.touch(ptr.touchKey??={},new T.Vector3(0,1.3,0));s.rayDraw(ptr,{x:0.2+k*0.02,y:0.5});}
+   s.lift(ptr);return {paths:s.paths.length,points:s.paths[0].p.length/2,w:s.w};});
+  assert.deepEqual({paths:ink.paths,points:ink.points},{paths:1,points:20});
   await page.goto(url+'?player=Grade4Regression&grade=4');await page.locator('#quickEdit').click();
   await page.locator('#homework').fill('Fraction | 7/8\nNegative decimal | -4.5\nWhich symbol? | < | <; >; =');await page.locator('#hwOnly').check();await page.locator('#deskBtn').click();await page.waitForFunction(()=>window.__castle?.props);
   const grade4=await page.evaluate(()=>{

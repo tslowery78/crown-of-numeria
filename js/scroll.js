@@ -30,16 +30,16 @@ export class MagicScroll {
     this.clear();
   }
 
-  // On the Magic Lock wall, to the left of the panel; sized to fit small rooms.
+  // On the Magic Lock wall, to the left of the panel: as big as the wall allows (up to 1 m wide).
   place(floor, y0, W, D, panelH, roofZ = null) {
-    const hw = W / 2, hd = D / 2, w = Math.max(0.3, Math.min(0.56, hw - 0.45)), h = w * (CH / CW);
+    const hw = W / 2, hd = D / 2, w = Math.max(0.3, Math.min(1.0, hw - 0.5)), h = w * (CH / CW);
     if (Math.abs(w - this.w) > 1e-6 || !this.sized) {
       this.w = w; this.sized = true;
       this.mesh.scale.set(w, h, 1);
       this.rollers.forEach((r, k) => { r.position.set(0, (k ? -1 : 1) * (h / 2 + 0.012), 0.012); r.children[0].scale.set(w + 0.04, 1, 1); r.children.slice(1).forEach((kn) => { kn.position.x = kn.userData.knob * (w / 2 + 0.03); }); });
     }
     this.floor = floor;
-    this.group.position.set(-(0.43 + w / 2), y0 + panelH, roofZ ?? -hd + 0.03);
+    this.group.position.set(-(0.43 + w / 2), y0 + Math.max(panelH, h / 2 + 0.45), roofZ ?? -hd + 0.03);
   }
 
   setProblem(text) { this.problemText = String(text || '').replace(/\n/g, ' '); this.clear(); }
@@ -107,10 +107,10 @@ export class MagicScroll {
     if (b) { this.strokes.delete(key); this.press(b); return; }
     if (py < HEAD + 14) { this.strokes.delete(key); return; }
     const last = this.strokes.get(key), c = this.ctx;
-    c.strokeStyle = INKS[this.ink]; c.fillStyle = INKS[this.ink]; c.lineWidth = 6; c.lineCap = 'round'; c.lineJoin = 'round';
+    c.strokeStyle = INKS[this.ink]; c.fillStyle = INKS[this.ink]; c.lineWidth = 8; c.lineCap = 'round'; c.lineJoin = 'round';
     this.used = true;
     if (this.kept) { this.kept = false; this.drawFooter(); } // changed since it was kept
-    if (!last) { c.beginPath(); c.arc(px, py, 3, 0, 7); c.fill(); const path = { c: this.ink, p: [Math.round(px), Math.round(py)] }; this.paths.push(path); this.strokes.set(key, { x: px, y: py, path }); this.dirty = true; return; }
+    if (!last) { c.beginPath(); c.arc(px, py, 4, 0, 7); c.fill(); const path = { c: this.ink, p: [Math.round(px), Math.round(py)] }; this.paths.push(path); this.strokes.set(key, { x: px, y: py, path }); this.dirty = true; return; }
     if (Math.hypot(px - last.x, py - last.y) < 1.5) return; // ignore hand-tracking jitter
     c.beginPath(); c.moveTo(last.x, last.y); c.lineTo(px, py); c.stroke();
     last.path.p.push(Math.round(px), Math.round(py));
@@ -126,7 +126,8 @@ export class MagicScroll {
     if (!this.active()) return false;
     const l = this.mesh.worldToLocal(tip.clone()); // plane is 1x1, scaled to w x h
     const zWorld = l.z * 1; // mesh is not scaled in z
-    if (Math.abs(l.x) <= 0.5 && Math.abs(l.y) <= 0.5 && zWorld < 0.02 && zWorld > -0.05) {
+    const reach = this.strokes.has(key) ? 0.045 : 0.02; // once writing, allow the finger to wobble off the parchment a little
+    if (Math.abs(l.x) <= 0.5 && Math.abs(l.y) <= 0.5 && zWorld < reach && zWorld > -0.08) {
       const [px, py] = this.uvToPx({ x: l.x + 0.5, y: l.y + 0.5 });
       this.stroke(key, px, py);
       return true;
