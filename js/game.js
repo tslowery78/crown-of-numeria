@@ -257,6 +257,10 @@ class Panel {
     const grd = ctx.createLinearGradient(0, 0, 0, PH); grd.addColorStop(0, '#2b1a4a'); grd.addColorStop(1, '#1a1030');
     ctx.fillStyle = grd; roundRect(ctx, 0, 0, PW, PH, 48); ctx.fill();
     ctx.lineWidth = 14; ctx.strokeStyle = '#e0b84a'; roundRect(ctx, 7, 7, PW - 14, PH - 14, 44); ctx.stroke();
+    if (this.backgroundArt) {
+      ctx.save(); roundRect(ctx, 0, 0, PW, PH, 48); ctx.clip();
+      ctx.drawImage(this.backgroundArt, 0, 0, PW, PH); ctx.restore();
+    }
     // header: title + progress gems
     ctx.fillStyle = '#ffe9a8'; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
     ctx.font = `bold 46px ${FONT}`; ctx.fillText(this.title, 40, 58);
@@ -269,6 +273,10 @@ class Panel {
     }
     // question
     ctx.fillStyle = '#fff8e6'; roundRect(ctx, 40, 180, PW - 80, 380, 30); ctx.fill();
+    if (this.parchmentArt) {
+      ctx.save(); roundRect(ctx, 40, 180, PW - 80, 380, 30); ctx.clip();
+      ctx.drawImage(this.parchmentArt, 40, 180, PW - 80, 380); ctx.restore();
+    }
     const { lines, size } = fitText(ctx, p.text, PW - 160, 340, 104, 34);
     ctx.fillStyle = '#2b1a4a'; ctx.textAlign = 'center';
     const top = 372 - (lines.length - 1) * size * 0.61;

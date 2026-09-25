@@ -16,6 +16,7 @@ import { ProblemSource } from './problems.js';
 import { GemTray } from './tray.js';
 import { MagicScroll } from './scroll.js';
 import { makeDragon } from './props.js';
+import { loadKingdomArt, makeIslandMagic, batchKingdomDragon, softenSkySeam } from './kingdom-art.js';
 
 const CELL = 0.2, R = 0.86, TOPY = 0.55, QUEST = 5; // metres: grid cell, island radius, island top height
 const PLAYER_Z = 1.45; // where she stands, in kingdom coordinates (the island centre is the origin)
@@ -104,7 +105,7 @@ function flatten(root) {
 export class Kingdom extends Game {
   constructor(opts) {
     super({ ...opts, mode: 'kingdom' });
-    this.kitReady = Promise.all([loadKit(), loadPeople()]).then(([k, p]) => { this.kit = k; this.people = p; });
+    this.kitReady = Promise.all([loadKit(), loadPeople(), loadKingdomArt()]).then(([k, p, art]) => { this.kit = k; this.people = p; this.kingdomArt = art; });
     this.renderer.shadowMap.enabled = true; this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   }
 
@@ -175,6 +176,8 @@ export class Kingdom extends Game {
     panel.wallMounted = true; // her scroll work goes into the answer booklet
     panel.onProblem = (p) => { this.tray.bind(panel, p); this.scroll.setProblem(p.text); this.readAloud(p, 1.0); };
     panel.onSolved = () => this.questComplete(panel);
+    panel.backgroundArt = this.kingdomArt['carved-wood']?.image;
+    panel.parchmentArt = this.kingdomArt.parchment?.image;
     this.board = panel; this.panels.push(panel); this.world.add(panel.mesh);
     this.tray = new GemTray(this); this.world.add(this.tray.group); this.tray.place(0, 0, this.W, this.D, this.panelH);
     this.scroll = new MagicScroll(this); this.world.add(this.scroll.group); this.scroll.place(0, 0, 2.6, this.D, this.panelH);
@@ -199,7 +202,7 @@ export class Kingdom extends Game {
   // ------------------------------------------------------------ island
   buildIsland() {
     const island = this.island = new THREE.Group(); island.position.y = TOPY; this.world.add(island);
-    const grass = canvasTexture(1024, 1024, (c, w, h) => {
+    const grass = this.kingdomArt['island-meadow'] || canvasTexture(1024, 1024, (c, w, h) => {
       const g = c.createRadialGradient(w / 2, h / 2, 40, w / 2, h / 2, w / 2); g.addColorStop(0, '#7cc55a'); g.addColorStop(0.85, '#63ad47'); g.addColorStop(1, '#4f8f3a');
       c.fillStyle = g; c.fillRect(0, 0, w, h);
       for (let k = 0; k < 9000; k++) { const x = Math.random() * w, y = Math.random() * h, l = 4 + Math.random() * 8; c.strokeStyle = `rgba(${Math.random() < 0.5 ? '40,90,30' : '170,220,120'},${0.15 + Math.random() * 0.2})`; c.lineWidth = 1.5; c.beginPath(); c.moveTo(x, y); c.lineTo(x + (Math.random() - 0.5) * 3, y - l); c.stroke(); }
@@ -208,7 +211,9 @@ export class Kingdom extends Game {
     this.islandTop = new THREE.Mesh(new THREE.CircleGeometry(R, 72).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ map: grass, roughness: 0.95 }));
     this.islandTop.receiveShadow = true; island.add(this.islandTop);
     // earth rim and a rocky underside that tapers to a point, like a floating sky island
-    island.add(new THREE.Mesh(new THREE.CylinderGeometry(R, R * 0.96, 0.07, 72, 1, true).translate(0, -0.035, 0), new THREE.MeshStandardMaterial({ color: 0x7a5534, roughness: 1, side: THREE.DoubleSide })));
+    const rim = new THREE.CylinderGeometry(R, R * 0.96, 0.07, 72, 1, true).translate(0, -0.035, 0);
+    if (this.kingdomArt['island-earth']) { const uv = rim.attributes.uv; for (let k = 0; k < uv.count; k++) uv.setY(k, .8 + uv.getY(k) * .2); }
+    island.add(new THREE.Mesh(rim, new THREE.MeshStandardMaterial({ map: this.kingdomArt['island-earth'], color: this.kingdomArt['island-earth'] ? 0xffffff : 0x7a5534, roughness: 1, side: THREE.DoubleSide })));
     const rock = new THREE.ConeGeometry(R * 0.96, TOPY - 0.12, 28, 6).rotateX(Math.PI).translate(0, -0.07 - (TOPY - 0.12) / 2, 0), p = rock.attributes.position, cols = [];
     for (let k = 0; k < p.count; k++) {
       const x = p.getX(k), y = p.getY(k), z = p.getZ(k), a = Math.atan2(z, x), j = 1 + 0.12 * Math.sin(a * 5 + y * 20) + 0.08 * Math.sin(a * 11);
@@ -216,7 +221,7 @@ export class Kingdom extends Game {
       const c = new THREE.Color(y > -0.12 ? 0x6b4a2e : 0x8a8478).multiplyScalar(0.85 + 0.15 * Math.sin(a * 7 + y * 30)); cols.push(c.r, c.g, c.b);
     }
     rock.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3)); rock.computeVertexNormals();
-    island.add(new THREE.Mesh(rock, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, flatShading: true })));
+    island.add(new THREE.Mesh(rock, new THREE.MeshStandardMaterial({ map: this.kingdomArt['island-earth'], vertexColors: !this.kingdomArt['island-earth'], roughness: 1, flatShading: true })));
     // a little pond with lilies (its cells can't be built on)
     const pond = new THREE.Vector2(-0.46, -0.32);
     const water = new THREE.Mesh(new THREE.CircleGeometry(0.15, 40).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x4fa8e0, roughness: 0.1, metalness: 0.1 }));
@@ -230,11 +235,15 @@ export class Kingdom extends Game {
     this.ghost = new THREE.Mesh(new THREE.RingGeometry(CELL * 0.36, CELL * 0.48, 32).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x4dff9a, transparent: true, opacity: 0.85, toneMapped: false, depthWrite: false }));
     this.ghost.position.y = 0.008; this.ghost.visible = false; island.add(this.ghost);
     this.blobMat = new THREE.MeshBasicMaterial({ map: canvasTexture(64, 64, (c, w) => { const g = c.createRadialGradient(w / 2, w / 2, 2, w / 2, w / 2, w / 2); g.addColorStop(0, 'rgba(20,40,10,0.45)'); g.addColorStop(1, 'rgba(20,40,10,0)'); c.fillStyle = g; c.fillRect(0, 0, w, w); }), transparent: true, depthWrite: false });
+    // One instanced submission for all soft contact shadows, including moved buildings.
+    this.blobs = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), this.blobMat, 64);
+    this.blobs.count = 0; this.blobs.frustumCulled = false; island.add(this.blobs);
+    this.islandMagic = makeIslandMagic(island, R);
     // magic sparkles drifting under the island
     const n = 60, sp = new Float32Array(n * 3);
     for (let k = 0; k < n; k++) { const a = Math.random() * TAU, r = Math.random() * R; sp[k * 3] = Math.cos(a) * r; sp[k * 3 + 1] = -Math.random() * TOPY; sp[k * 3 + 2] = Math.sin(a) * r; }
     const sg = new THREE.BufferGeometry(); sg.setAttribute('position', new THREE.BufferAttribute(sp, 3));
-    this.sparkles = new THREE.Points(sg, new THREE.PointsMaterial({ color: 0xfff0a0, size: 0.02, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }));
+    this.sparkles = new THREE.Points(sg, new THREE.PointsMaterial({ map: this.islandMagic.soft, color: 0xfff0a0, size: 0.02, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }));
     island.add(this.sparkles);
   }
   *cells() { const n = Math.floor(R / CELL); for (let i = -n; i <= n; i++) for (let j = -n; j <= n; j++) if (Math.hypot(i * CELL, j * CELL) <= R - CELL * 0.55) yield [i, j]; }
@@ -262,7 +271,6 @@ export class Kingdom extends Game {
     if (!this.cellOK(i, j, foot)) return null;
     const root = new THREE.Group(), model = this.makeModel(id, seed);
     root.add(model);
-    const blob = new THREE.Mesh(new THREE.PlaneGeometry(CELL * foot * 1.05, CELL * foot * 1.05).rotateX(-Math.PI / 2), this.blobMat); blob.position.y = 0.003; root.add(blob);
     // an invisible box to point at or grab it
     const box = new THREE.Box3().setFromObject(model), size = box.getSize(new THREE.Vector3());
     const hit = new THREE.Mesh(new THREE.BoxGeometry(Math.max(size.x, 0.1), Math.max(size.y, 0.08), Math.max(size.z, 0.1)), new THREE.MeshBasicMaterial({ visible: false }));
@@ -270,12 +278,11 @@ export class Kingdom extends Game {
     root.position.copy(this.cellCentre(i, j, foot)); root.rotation.y = rot * Q;
     this.island.add(root);
     model.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-    blob.material = this.blobMat; blob.scale.setScalar(0.8);
     const b = { id, i, j, rot, seed, foot, root, model, hit, spin: [], smoke: ['cottage', 'house'].includes(id) ? this.makeSmoke(root, id) : null };
     model.traverse((o) => { if (o.userData.spin) b.spin.push(o); });
     hit.userData.building = b;
     for (const [a, c] of this.footCells(i, j, foot)) this.occupied.set(`${a},${c}`, b);
-    this.buildings.push(b);
+    this.buildings.push(b); this.updateBlobs();
     if (fresh) this.syncVillagers();
     if (fresh) {
       model.scale.setScalar(0.001);
@@ -288,7 +295,16 @@ export class Kingdom extends Game {
   liftBuilding(b) {
     for (const [a, c] of this.footCells(b.i, b.j, b.foot)) this.occupied.delete(`${a},${c}`);
     this.buildings = this.buildings.filter((x) => x !== b);
-    this.island.remove(b.root);
+    this.island.remove(b.root); this.updateBlobs();
+  }
+
+  updateBlobs() {
+    const dummy = new THREE.Object3D(); this.blobs.count = this.buildings.length;
+    this.buildings.forEach((b, k) => {
+      dummy.position.copy(b.root.position).setY(.003); dummy.rotation.y = b.root.rotation.y;
+      dummy.scale.setScalar(CELL * b.foot * 1.05 * .8); dummy.updateMatrix(); this.blobs.setMatrixAt(k, dummy.matrix);
+    });
+    this.blobs.instanceMatrix.needsUpdate = true;
   }
 
   // Chimney smoke: a few soft puffs rising from the chimney, recycled.
@@ -296,7 +312,7 @@ export class Kingdom extends Game {
     this.smokeMat ??= new THREE.SpriteMaterial({ map: canvasTexture(64, 64, (c, w) => { const g = c.createRadialGradient(w / 2, w / 2, 2, w / 2, w / 2, w / 2); g.addColorStop(0, 'rgba(255,255,255,0.8)'); g.addColorStop(1, 'rgba(255,255,255,0)'); c.fillStyle = g; c.fillRect(0, 0, w, w); }), transparent: true, depthWrite: false, opacity: 0.6 });
     const top = id === 'cottage' ? new THREE.Vector3(0.32, 2.0, -0.2) : new THREE.Vector3(0.32, 3.05, -0.2);
     const puffs = [];
-    for (let k = 0; k < 5; k++) { const sp = new THREE.Sprite(this.smokeMat.clone()); sp.userData.t = k / 5; root.add(sp); puffs.push(sp); }
+    for (let k = 0; k < 3; k++) { const sp = new THREE.Sprite(this.smokeMat.clone()); sp.userData.t = k / 3; root.add(sp); puffs.push(sp); }
     return { puffs, top: top.multiplyScalar(CELL) };
   }
   updateSmoke(b, dt) {
@@ -394,12 +410,17 @@ export class Kingdom extends Game {
       const sky = new THREE.SphereGeometry(80, 32, 16), cols = [], top = new THREE.Color(0x5a9be6), hor = new THREE.Color(0xe6f3ff), pa = sky.attributes.position;
       for (let k = 0; k < pa.count; k++) { const c = hor.clone().lerp(top, clamp(pa.getY(k) / 80, 0, 1) ** 0.6); cols.push(c.r, c.g, c.b); }
       sky.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
-      env.add(new THREE.Mesh(sky, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, toneMapped: false, depthWrite: false })));
-      const meadow = new THREE.Mesh(new THREE.CircleGeometry(70, 64).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x5f9e45, roughness: 1 }));
+      const skyArt = this.kingdomArt['storybook-sky'];
+      const dome = new THREE.Mesh(sky, new THREE.MeshBasicMaterial({ map: skyArt, vertexColors: !skyArt, side: THREE.BackSide, toneMapped: false, depthWrite: false }));
+      if (skyArt) softenSkySeam(dome.material);
+      // Lift the painted horizon above the ground plane; put the far castle to her right.
+      if (skyArt) { const uv = sky.attributes.uv; for (let k = 0; k < uv.count; k++) uv.setY(k, uv.getY(k) * .92); }
+      dome.rotation.y = -.6; env.add(dome);
+      const meadow = new THREE.Mesh(new THREE.CircleGeometry(70, 64).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ map: this.kingdomArt['meadow-tile'], color: this.kingdomArt['meadow-tile'] ? 0xffffff : 0x5f9e45, roughness: 1 }));
       meadow.position.y = -0.03; meadow.receiveShadow = true; env.add(meadow);
       // distant hills so the horizon isn't bare
       const hillMat = new THREE.MeshStandardMaterial({ color: 0x6fa857, roughness: 1, flatShading: true });
-      for (let k = 0; k < 14; k++) { const a = (k / 14) * TAU, h = new THREE.Mesh(new THREE.SphereGeometry(8 + Math.random() * 6, 12, 8), hillMat); h.scale.y = 0.35; h.position.set(Math.cos(a) * 55, -1, Math.sin(a) * 55); env.add(h); }
+      for (let k = 0; !skyArt && k < 14; k++) { const a = (k / 14) * TAU, h = new THREE.Mesh(new THREE.SphereGeometry(8 + Math.random() * 6, 12, 8), hillMat); h.scale.y = 0.35; h.position.set(Math.cos(a) * 55, -1, Math.sin(a) * 55); env.add(h); }
       this.growBtn = makeSign('Grow big again', { w: 0.46, h: 0.1, size: 70, bg: '#2b1a4a', fg: '#ffe9a8' });
       this.growBtn.userData.button = { action: () => this.growBack() };
       env.add(this.growBtn);
@@ -441,7 +462,7 @@ export class Kingdom extends Game {
     this.shopHeadTex = new THREE.CanvasTexture(this.shopHead); this.shopHeadTex.colorSpace = THREE.SRGBColorSpace;
     const head = new THREE.Mesh(new THREE.PlaneGeometry(W, W * 160 / 1024), new THREE.MeshBasicMaterial({ map: this.shopHeadTex, transparent: true, toneMapped: false }));
     head.position.y = H / 2 + 0.06; shop.group.add(head); this.shopHeadMesh = head;
-    const back = new THREE.Mesh(new THREE.PlaneGeometry(W, H), new THREE.MeshStandardMaterial({ color: 0x6b4526, roughness: 0.8 }));
+    const back = new THREE.Mesh(new THREE.PlaneGeometry(W, H), new THREE.MeshStandardMaterial({ map: this.kingdomArt['carved-wood'], color: this.kingdomArt['carved-wood'] ? 0xffffff : 0x6b4526, roughness: 0.8 }));
     back.position.z = -0.08; shop.group.add(back);
     const shelfMat = new THREE.MeshStandardMaterial({ color: 0x8a5a30, roughness: 0.7 });
     for (let r = 0; r < rows; r++) { const s = new THREE.Mesh(new THREE.BoxGeometry(W, 0.014, 0.16), shelfMat); s.position.set(0, H / 2 - 0.1 - (r + 1) * sh + 0.045, 0); shop.group.add(s); }
@@ -474,6 +495,10 @@ export class Kingdom extends Game {
     const c = this.shopHead.getContext('2d'), w = 1024, h = 160;
     c.clearRect(0, 0, w, h);
     c.fillStyle = '#2b1a4a'; roundRect(c, 0, 0, w, h, 34); c.fill(); c.lineWidth = 8; c.strokeStyle = '#e0b84a'; roundRect(c, 4, 4, w - 8, h - 8, 30); c.stroke();
+    if (this.kingdomArt['carved-wood']) {
+      c.save(); roundRect(c, 0, 0, w, h, 34); c.clip();
+      c.drawImage(this.kingdomArt['carved-wood'].image, 0, 0, w, h); c.restore();
+    }
     c.fillStyle = '#ffe9a8'; c.font = `bold 62px ${FONT}`; c.textBaseline = 'middle'; c.textAlign = 'left'; c.fillText("Builder's Shop", 40, h / 2);
     drawGem(c, 700, h / 2, 40, '#e0115f'); c.fillStyle = '#fff'; c.font = `bold 86px ${FONT}`; c.fillText(`${this.gems}`, 760, h / 2 + 4);
     this.shopHeadTex.needsUpdate = true;
@@ -508,6 +533,7 @@ export class Kingdom extends Game {
   }
   questComplete(panel) {
     this.quests++;
+    this.islandMagic.celebrate();
     this.audio.cueChest();
     const at = panel.mesh.getWorldPosition(new THREE.Vector3());
     this.burst(at, 60);
@@ -602,7 +628,9 @@ export class Kingdom extends Game {
     if ([5, 10, 15, 20, 30, 40].includes(n)) { this.audio.cueUnlock(); this.showBanner(`${n} buildings! Your kingdom is growing!`); this.dragonVisit(); }
   }
   dragonVisit() {
-    const d = makeDragon(); d.group.scale.setScalar(0.18); this.world.add(d.group);
+    // A milestone can overlap a quest: keep one visiting dragon within the draw budget.
+    if (this.visitors.length) { this.visitors[0].t = 0; return; }
+    const d = batchKingdomDragon(makeDragon()); d.group.scale.setScalar(0.18); this.world.add(d.group);
     const v = { d, t: 0, life: 14 }; this.visitors.push(v);
     this.audio.roar(this.island.getWorldPosition(new THREE.Vector3()));
   }
@@ -726,6 +754,7 @@ export class Kingdom extends Game {
     // life: spinning windmills, drifting sparkles, the shop's affordable items bob, visiting dragons
     for (const b of this.buildings) { for (const s of b.spin) s.rotation.x += dt * 1.2; if (b.smoke) this.updateSmoke(b, dt); }
     this.updateVillagers(dt, head);
+    this.islandMagic.update(dt, t);
     if (this.visiting) { this.updateGrowButton(head); if (xr) this.locomotion(dt); }
     const sp = this.sparkles.geometry.attributes.position;
     for (let k = 0; k < sp.count; k++) { let y = sp.getY(k) + dt * 0.04; if (y > -0.02) y = -TOPY; sp.setY(k, y); }
