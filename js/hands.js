@@ -132,3 +132,41 @@ export class HandMenu {
     this.group.updateMatrixWorld(true);
   }
 }
+
+// A see-through "ghost" hand for the first-run hint: no words, it shows a pinch, then a finger poke.
+// Fingers point along the hand's -Z (towards the panel it sits in front of); pose(t) animates one loop.
+export const GHOST_LOOP = 3.2;
+export function makeGhostHand() {
+  const mat = new THREE.MeshBasicMaterial({ color: 0xe4f2ff, transparent: true, opacity: 0.75, depthWrite: false, toneMapped: false });
+  const hand = new THREE.Group(), body = new THREE.Group(); hand.add(body);
+  body.rotation.x = -Math.PI / 2; // fingers (+Y in body space) point into the panel, back of the hand up
+  body.add(new THREE.Mesh(new THREE.BoxGeometry(0.074, 0.08, 0.024), mat));
+  const finger = (x, y, len, rz = 0) => {
+    const k = new THREE.Group(); k.position.set(x, y, 0); k.rotation.z = rz;
+    const c = new THREE.Mesh(new THREE.CapsuleGeometry(0.0085, len, 4, 8), mat); c.position.y = len / 2 + 0.008; k.add(c);
+    body.add(k); return k;
+  };
+  const fingers = [finger(-0.027, 0.04, 0.055), finger(-0.009, 0.04, 0.06), finger(0.009, 0.04, 0.056), finger(0.027, 0.04, 0.046)];
+  const thumb = finger(-0.04, -0.012, 0.042, 0.75);
+  hand.pose = (t) => {
+    t %= GHOST_LOOP;
+    const half = GHOST_LOOP / 2;
+    if (t < half) { // pinch: index and thumb close together, then open
+      const s = Math.sin((Math.PI * t) / half);
+      fingers[0].rotation.x = -0.9 * s; thumb.rotation.z = 0.75 - 0.55 * s; thumb.rotation.x = -0.5 * s;
+      for (const f of fingers.slice(1)) f.rotation.x = -0.35;
+      body.position.z = 0;
+    } else { // poke: index straight, the others curled, the hand pushes in and back
+      const u = Math.sin((Math.PI * (t - half)) / half);
+      fingers[0].rotation.x = 0; thumb.rotation.z = 0.2; thumb.rotation.x = -0.6;
+      for (const f of fingers.slice(1)) f.rotation.x = -1.5;
+      body.position.z = -0.06 * u;
+    }
+  };
+  // drawn after the panel it hovers over (whose transparent canvas would otherwise cover it), rolled so
+  // she sees the gap between thumb and finger, a little larger than life so it reads at a glance
+  hand.traverse((o) => { if (o.isMesh) o.renderOrder = 15; });
+  hand.rotation.z = -0.7; hand.scale.setScalar(1.25);
+  hand.pose(0);
+  return hand;
+}

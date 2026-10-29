@@ -818,6 +818,7 @@ export class Kingdom extends Game {
     for (const a of this.anims.filter((a) => a.t >= a.dur)) a.done?.();
     this.anims = this.anims.filter((a) => a.t < a.dur);
     this.updateParticles(dt); this.pressFx.update(dt);
+    if (xr && !this.visiting) this.updateHandHint(dt, this.board);
     this.handMenu.update(dt);
     this.updatePointers(dt, []);
     this.updateTeleport();

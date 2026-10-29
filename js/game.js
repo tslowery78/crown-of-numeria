@@ -13,7 +13,7 @@ import { Props } from './props.js';
 import { GemTray } from './tray.js';
 import { MagicScroll } from './scroll.js';
 import { loadAssets, ART_FLOORS } from './assets.js';
-import { PressFx, shown, pokeThrough, makeFillRing, HandMenu } from './hands.js';
+import { PressFx, shown, pokeThrough, makeFillRing, HandMenu, makeGhostHand, GHOST_LOOP } from './hands.js';
 
 // ------------------------------------------------------------ layout
 const FH = 3.6, SLAB = 0.4, CEIL = FH - SLAB, WALL_T = 0.3, HATCH = 1.2;
@@ -1912,6 +1912,24 @@ export class Game {
   buttonMeshes() { return [...this.menuButtons(), this.rideBtn]; }
   uiButtons() { return (this.paused ? this.menuButtons() : this.buttonMeshes()).filter((b) => b && b.userData.button && shown(b)); }
 
+  // ---------------------------------------------------------- first-run hint
+  // The first time a player is in the headset, a ghost hand by the first panel shows a pinch, then a
+  // poke (no words). Three loops at most, gone as soon as she presses a key; once per player.
+  updateHandHint(dt, panel) {
+    if (this.hintDone || !panel?.mesh.visible || panel.state !== 'solving') return;
+    if (!this.handHint) {
+      const key = `mathcastle.handhint.${this.playerKey}`;
+      let seen = false; try { seen = !!localStorage.getItem(key); localStorage.setItem(key, '1'); } catch { /* private mode */ }
+      if (seen) { this.hintDone = true; return; }
+      this.handHint = makeGhostHand(); this.handHintT = 0; this.handHintPanel = panel;
+      this.handHint.position.set(panel.w * 0.18, -panel.h * 0.16, 0.1); panel.mesh.add(this.handHint);
+      this.hintStart = { input: panel.input, solved: panel.solved };
+    }
+    this.handHintT += dt;
+    if (this.handHintT > 3 * GHOST_LOOP || panel.input !== this.hintStart.input || panel.solved !== this.hintStart.solved) { this.handHint.removeFromParent(); this.hintDone = true; return; }
+    this.handHint.pose(this.handHintT);
+  }
+
   // ---------------------------------------------------------- seated play
   makeSeat() {
     this.rideBtn = makeSign('Ride up!  ▲', { w: 0.3, h: 0.1, size: 80, bg: '#1f6b3a', fg: '#ffffff' });
@@ -2175,6 +2193,7 @@ export class Game {
     this.avatarRig.update(head, headQ, this.rig.position.y, hands, dt, t);
     // props, touches, audio listener
     const tips = this.extraTips.splice(0);
+    if (xr && this.level === 0) this.updateHandHint(dt, this.locks[0]?.panel);
     this.handMenu.update(dt);
     this.updatePointers(dt, tips);
     this.props.update(dt, t, head, tips);

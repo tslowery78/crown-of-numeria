@@ -247,6 +247,11 @@ const url=process.argv[2]||'http://127.0.0.1:8765/';
    const {g,v}=__H,H=__H,r={},[L,R]=g.pointers;H.xrOn();
    g.camera.position.set(0,1.3,0);g.camera.rotation.set(0,0,0);g.scene.updateMatrixWorld(true);
    H.hand(R,'right',g.headPos().add(v(.2,-.4,-.3)),v(0,1,0),v(-1,0,0));
+   // first-run hint: a ghost hand by the quest board, shown once per player, gone when she presses a key
+   localStorage.removeItem('mathcastle.handhint.handskingdom');g.hintDone=false;g.handHint=null;
+   g.updateHandHint(.1,g.board);r.hintShown=!!g.handHint&&g.handHint.parent===g.board.mesh;g.updateHandHint(1.2,g.board);
+   const bp=g.board.problem;g.board.busyUntil=0;g.board.pressKey(bp.choices?'choice:'+bp.answer:bp.answer[0]);g.updateHandHint(.1,g.board);r.hintGoneOnPress=!g.handHint.parent;
+   g.hintDone=false;g.handHint=null;g.updateHandHint(.1,g.board);r.hintOnce=!g.handHint&&g.hintDone;
    H.pokeThrough(R,g.shrinkBtn);r.pokedShrink=g.visiting;
    let head=g.headPos();g.updateGrowButton(head);g.scene.updateMatrixWorld(true);
    const yaw0=g.rig.rotation.y;H.pokeThrough(R,g.turnBtns[1]);
@@ -264,7 +269,7 @@ const url=process.argv[2]||'http://127.0.0.1:8765/';
    // pause works here too
    g.setPaused(true);H.xrOff();g.frame();r.kingdomPaused=!!g.paused;g.setPaused(false);
    g.growBack();return r;});
-  assert.deepEqual(kingdomHands,{...kingdomHands,pokedShrink:true,turnedRight:true,turnKeepsHead:true,turnedBack:true,ring:true,teleported:true,keptOnIsland:true,kingdomPaused:true});
+  assert.deepEqual(kingdomHands,{...kingdomHands,hintShown:true,hintGoneOnPress:true,hintOnce:true,pokedShrink:true,turnedRight:true,turnKeepsHead:true,turnedBack:true,ring:true,teleported:true,keptOnIsland:true,kingdomPaused:true});
   // ---- Seated play (?seated=1): no measuring or walking; every interactable within ~0.6 m of her shoulder.
   // Reach is measured from a seated shoulder point (eye height - 0.25 m, 5 cm behind the eyes); "behind" counts points behind her.
   const seatHelpers=()=>page.evaluate(()=>{const {g,v}=__H;
