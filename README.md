@@ -121,13 +121,22 @@ The game adds a backup of its own. The castle room is sized to fit inside the cl
 
 | Action | Hands | Controllers | Desktop |
 |---|---|---|---|
-| Press a button | poke it with your finger (or point + pinch) | poke it with the magic-wand tip (or point + trigger) | click |
+| Press a button (panel keys, signs, menus) | poke it with your finger (or point + pinch) | poke it with the magic-wand tip (or point + trigger) | click |
 | Open a chest | touch it | touch it with the wand, or point + trigger | click |
-| Move | walk | walk | WASD / arrows + mouse |
-| Go up a floor | stand on the glowing square | same | walk onto the square |
+| Move | walk (seated: no walking needed) | walk | WASD / arrows + mouse |
+| Go up a floor | stand on the glowing square (seated: press **Ride up**) | same | walk onto the square |
 | Grab / throw | pinch near it, let go while moving | grip (or trigger) near it; point + trigger pulls it to your hand | click it, then click again to throw |
+| Mark a room corner | pinch and hold until the ring fills (about half a second) | pull the trigger | – |
+| Gems, Pause, Recenter, Leave VR | turn your left palm towards you; poke the menu with your right finger | press X; poke with the right wand or point + trigger | P pauses |
+| Move while shrunk (My Kingdom) | pinch, aim at the meadow, let go to hop there; poke ← / → beside *Grow big again* to turn | left stick glides, right stick turns (or point + trigger to hop) | WASD |
 
-There's no thumbstick movement or turning. Check the room alignment against the clear space when entering VR. The ride up takes about 5 seconds and pauses if she steps off the square. The gem and floor counter sits on the left controller.
+Everything works with bare hands; controllers are optional. There's no thumbstick movement or turning in the castle. Check the room alignment against the clear space when entering VR. The ride up takes about 5 seconds and pauses if she steps off the square. The gem and floor counter sits on the left wrist (hands: shown while the palm faces her) or on the left controller.
+
+**Pause** freezes the game: animations, the lift, physics, villagers, panel timers and all sound. Opening the Meta menu (or taking the headset off) pauses too; press **Resume** in front of you or on the wrist menu. **Recenter** puts a seated or fixed-size castle (and My Kingdom) back in front of you; a measured or Guardian-fitted castle stays on the real floor (hold the Meta button to recenter the headset instead).
+
+**Play sitting down** (setup toggle, or add `&seated=1` to a bookmark link) skips room measuring. Every castle floor is built around her chair: the Magic Lock panel straight ahead, the Magic Scroll front-left, the gem tray front-right and the floor's chest on a pedestal to her right, all within about 0.6 m of her shoulder. My Kingdom puts the island top at table height (0.72 m) just past her knees, with the quest board, scroll, tray and shop within reach. A `seated=` link applies to that visit only; standing stays the default.
+
+The first time each player is in the headset, a ghost hand by the first panel shows a pinch, then a poke.
 
 ## Adding homework
 
@@ -159,8 +168,9 @@ Desktop and simulated XR tests do not establish Quest frame rate, stereo mirror 
 - `js/avatar.js`: family looks, hero avatars and setup preview
 - `js/tray.js`: the hands-on gem tray
 - `js/scroll.js`: the Magic Scroll scratch paper
+- `js/hands.js`: hands-first helpers: palm direction, the wrist counter and hand menu, pinch-hold fill ring, button poke and press feedback, the first-run ghost hand
 - `assets/title.jpg`: setup-page illustration
-- `tests/`: `npm test` covers answer checking and 15,600 generated problems. `npm run test:browser:files` runs the full desktop and simulated-VR regression in Chrome, serving files from disk.
+- `tests/`: `npm test` covers answer checking and 15,600 generated problems. `npm run test:browser:files` runs the full desktop and simulated-VR regression in Chrome, serving files from disk. Stub hand input sources (joint poses) cover the wrist counter, hand menu pause/resume, pinch-hold corners, button poke, kingdom turn buttons and teleport, and seated reach.
 - `js/audio.js`: procedural music, cues and 3D sound effects
 - `js/problems.js`: grade 2/4 problem generators, answer checking, homework parser
 - `vendor/three/`: three.js r186, bundled so the game doesn't need a CDN (with GLTFLoader)
