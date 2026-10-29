@@ -193,7 +193,7 @@ export class GemTray {
     if (target > cur) for (let k = cur; k < target; k++) steps.push(() => { this.setSlot(this.nextEmpty(), true, 'B'); this.changed(false, 1); });
     else for (let k = cur; k > target; k--) steps.push(() => { const s = [...this.slots].reverse().find((x) => x.gem); this.setSlot(s, false); this.changed(false, -1); });
     let i = 0;
-    const tick = () => { if (i < steps.length) { steps[i++](); this.demoTimer = setTimeout(tick, 420); } else this.demoTimer = null; };
+    const tick = () => { if (this.g.paused) { this.demoTimer = setTimeout(tick, 200); return; } if (i < steps.length) { steps[i++](); this.demoTimer = setTimeout(tick, 420); } else this.demoTimer = null; };
     this.demoTimer = setTimeout(tick, 400);
     return 0.4 + steps.length * 0.42;
   }

@@ -1777,13 +1777,13 @@ export class Game {
     });
     window.addEventListener('keydown', (e) => {
       const k = e.key;
+      if (k === 'p' || k === 'P') { this.setPaused(!this.paused); return; }
+      if (this.paused) return;
       if (/^[0-9./-]$/.test(k) || k === 'Backspace' || k === 'Enter') {
         const p = this.activePanel();
         if (p) { p.pressKey(k === 'Backspace' ? '⌫' : k === 'Enter' ? 'OK' : k); e.preventDefault(); }
         return;
       }
-      if (k === 'p' || k === 'P') this.setPaused(!this.paused);
-      if (this.paused) return;
       if (k === 'h' || k === 'H') this.activePanel()?.pressKey('hint');
       if (k === 'r' || k === 'R') this.activePanel()?.pressKey('read');
       this.keys.add(k.toLowerCase());
@@ -1970,6 +1970,7 @@ export class Game {
   // the panels' timers; only the menu and a Resume button in front of her still answer.
   setPaused(on) {
     if (!!on === !!this.paused) return;
+    if (on && this.roomMeasure) return; // measuring has no clock to freeze, and its frame never draws the pause menu
     if (on) {
       this.paused = { at: performance.now() };
       clearTimeout(this.readTimer); if ('speechSynthesis' in window) speechSynthesis.cancel();

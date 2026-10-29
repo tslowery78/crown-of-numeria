@@ -199,12 +199,14 @@ export class Kingdom extends Game {
 
   // Quest board, scroll and gem tray on her left; the shop on her right; the island ahead.
   layoutStation() {
-    const face = (o, x, y, z) => { o.position.set(x, y, z); o.lookAt(0, y, this.playerZ + 0.3); };
+    this.world.updateMatrixWorld(true);
+    const toWorld = (x, y, z) => this.world.localToWorld(new THREE.Vector3(x, y, z)); // lookAt takes world coordinates
+    const face = (o, x, y, z) => { o.position.set(x, y, z); o.lookAt(toWorld(0, y, this.playerZ + 0.3)); };
     const y = this.panelH;
     if (this.seated) {
       // round her chair: quest board front-left, shop front-right; the scroll lies tilted like paper at the
       // table's edge in front of her, the gem tray hovers just beyond it over the island's near edge
-      const arc = (o, deg, r, yy) => { const a = (deg * Math.PI) / 180; o.position.set(Math.sin(a) * r, yy, this.playerZ - Math.cos(a) * r); o.lookAt(0, yy, this.playerZ); };
+      const arc = (o, deg, r, yy) => { const a = (deg * Math.PI) / 180; o.position.set(Math.sin(a) * r, yy, this.playerZ - Math.cos(a) * r); o.lookAt(toWorld(0, yy, this.playerZ)); };
       arc(this.board.mesh, -55, 0.33, y);
       arc(this.shop.group, 42, 0.33, y - 0.02); this.shop.group.scale.setScalar(SEAT_SHOP);
       arc(this.scroll.group, 0, 0.25, TOPY + 0.1); this.scroll.group.rotateX(-1.0);
@@ -522,7 +524,11 @@ export class Kingdom extends Game {
     this.audio.pickup(tg); this.burst(tg.clone().setY(0.15), 20, 0.03, 1.5);
     return true;
   }
-  selectEnd(ptr) { super.selectEnd(ptr); if (ptr.teleport) this.finishTeleport(ptr); }
+  selectEnd(ptr) {
+    super.selectEnd(ptr);
+    if (!ptr.teleport) return;
+    if (this.paused) { ptr.teleport = null; if (this.teleRing) this.teleRing.visible = false; } else this.finishTeleport(ptr);
+  }
 
   // ------------------------------------------------------------ shop
   buildShop() {
