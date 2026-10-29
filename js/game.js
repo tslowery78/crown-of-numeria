@@ -31,6 +31,9 @@ const fy = (i) => i * FH;
 // window centres along a wall of length `len` (metres from the wall's middle)
 export const windowSpots = (len) => (len >= 4.6 ? [-len / 4, len / 4] : [0]);
 const ROOM_MIN = 1.6, ROOM_MAX = 8, EDGE_MARGIN = 0.15;
+// Seated play: a fixed 3 m castle built around her chair (she sits on the lift square), with every
+// panel, chest, tray and scroll on an arc within arm's reach. Panels are a little narrower.
+const SEATED_ROOM = 3, SEAT_PANEL_W = 0.58;
 const PINCH_HOLD = 0.5; // seconds a hand must keep pinching to mark a corner (a stray pinch does nothing)
 const ROOM_KEY = 'mathcastle.room.v1'; // measured room, stored in the Guardian-anchored space
 const TREASURES = [
@@ -430,7 +433,7 @@ export class Game {
     this.renderer.setAnimationLoop((time, frame) => this.frame(frame));
   }
 
-  presetSize() { const n = parseFloat(this.opts.roomSize); return Number.isFinite(n) ? n : this.opts.roomSize === 'room' ? 3.5 : 2.5; }
+  presetSize() { if (this.opts.seated) return SEATED_ROOM; const n = parseFloat(this.opts.roomSize); return Number.isFinite(n) ? n : this.opts.roomSize === 'room' ? 3.5 : 2.5; }
 
   async startDesktop() {
     await this.assetsReady;
@@ -446,7 +449,7 @@ export class Game {
     try {
       await this.assetsReady;
       let type = 'local-floor', w = this.presetSize(), d = w, cx = 0, cz = 0, frame = null;
-      this.roomMode = this.opts.roomSize === 'room';
+      this.roomMode = this.opts.roomSize === 'room' && !this.opts.seated; // seated: no room measuring, no walking
       if (this.roomMode) {
         // Full-room play: measure the clear space by walking its corners. In the Guardian-anchored
         // 'bounded-floor' space the measurement stays valid next time, so it is saved.
@@ -456,7 +459,7 @@ export class Game {
         this.xrBoundsSpace = space;
         let saved = null; try { saved = JSON.parse(localStorage.getItem(ROOM_KEY)); } catch { /* none */ }
         if (space && saved?.type === 'bounded-floor' && !this.opts.remeasure) { w = saved.w; d = saved.d; frame = saved; }
-      } else if (this.opts.roomSize === 'auto') {
+      } else if (this.opts.roomSize === 'auto' && !this.opts.seated) {
         let space;
         try { space = await session.requestReferenceSpace('bounded-floor'); }
         catch { throw new Error('Guardian bounds are unavailable. Choose a measured play-area size.'); }
@@ -487,6 +490,7 @@ export class Game {
       // her progress and keep the castle on the same physical spot: apply the reset transform, or,
       // if the headset gives none, ask her to walk back to the middle. Guardian-fit mode restarts.
       const reset = (ev) => {
+        if (this.opts.seated) { this.xrCalibrating = true; return; } // seated: rebuild around where she now sits and looks
         if (this.roomMode) { // keep the castle on the measured floor: use the transform, or re-mark the front wall
           if (ev?.transform) this.applyResetTransform(ev.transform); else this.beginMeasure(type, true);
           return;
@@ -695,7 +699,7 @@ export class Game {
     this.level = 0; this.lift = { state: 'locked', dwell: 0, t: 0 };
     this.panels = []; this.chests = []; this.locks = []; this.hatches = []; this.blockers = []; this.floaters = [];
     this.mirrors = []; this.windows = []; this.torches = []; this.spinners = []; this.decor = [];
-    this.panelH = 1.0;
+    this.panelH = 1.0; this.seated = !!this.opts.seated; this.seatEye = 1.15;
     this.rig.position.set(0, 0, 0);
 
     const S = new StaticBatch(), world = this.world, hw = W / 2, hd = D / 2;
@@ -827,6 +831,7 @@ export class Game {
     this.makeFinale();
     this.makeLift();
     this.makeWelcome();
+    if (this.seated) this.makeSeat();
     this.makeMirror(0, new THREE.Vector3(hw - 0.02, 0, 0), -Math.PI / 2);
     this.makeMirror(3, new THREE.Vector3(hw - 0.02, fy(3), 0), -Math.PI / 2);
     this.makeMirror(TOP, new THREE.Vector3(-hw + 0.35, fy(TOP), 0), Math.PI / 2, true);
@@ -1234,7 +1239,7 @@ export class Game {
       g.position.set((k - (n - 1) / 2) * 0.16, y0 + 2.6, -hd + 0.06); this.world.add(g); gems.push(g);
     }
     const lock = { i, pad, gems, open: false };
-    const panel = new Panel(this, { title: `Magic Lock ${i + 1}`, count: n, defer: true, doneText: 'Unlocked!', onSolved: () => this.unlock(lock) });
+    const panel = new Panel(this, { title: `Magic Lock ${i + 1}`, count: n, defer: true, doneText: 'Unlocked!', width: this.seated ? SEAT_PANEL_W : 0.8, onSolved: () => this.unlock(lock) });
     panel.mesh.position.set(0, y0 + this.panelH, -hd + 0.03);
     panel.floor = i; panel.wallMounted = true;
     const orig = panel.update.bind(panel);
@@ -1254,7 +1259,12 @@ export class Game {
     this.retirePanel(lock.panel, 1.4);
     this.tray.hide();
     this.lift = { state: 'ready', dwell: 0, t: 0 };
-    this.setGuide('Step onto the glowing square!');
+    this.setGuide(this.seated ? 'Press Ride up!' : 'Step onto the glowing square!');
+  }
+  // seated: the "Ride up!" button replaces standing on the glowing square
+  rideUp() {
+    const L = this.lift; if (L.state !== 'ready') return;
+    L.state = 'rising'; L.t = 0; this.setGuide('Hold on! Going up…'); this.audio.cueLift();
   }
 
   makeLift() {
@@ -1294,18 +1304,19 @@ export class Game {
   onSquare(p) { const m = HATCH / 2 - 0.05; return Math.abs(p.x) < m && Math.abs(p.z) < m; }
 
   updateLift(dt, head) {
-    const L = this.lift, y0 = fy(this.level), on = this.onSquare(head);
+    const L = this.lift, y0 = fy(this.level), on = this.seated || this.onSquare(head);
     const glow = L.state === 'ready' || L.state === 'rising';
     this.runeMat.color.setScalar(glow ? 0.75 + 0.25 * Math.sin(this.clock.elapsedTime * 4) : 0.45);
     this.liftPosts.forEach((c) => { c.visible = glow; c.rotation.y += dt * 2; });
     this.beam.visible = L.state === 'ready';
     this.beam.position.set(0, y0, 0);
-    if (this.guide) {
+    if (this.guide && this.seated) { this.guide.position.set(0, y0 + this.seatEye + 0.32, -0.8); this.guide.lookAt(head); }
+    else if (this.guide) {
       this.guide.position.set(0, y0 + 2.2, 0);
       if (Math.hypot(head.x, head.z) > 0.2) this.guide.lookAt(head.x, y0 + 2.2, head.z); else this.guide.lookAt(head.x, y0 + 2.2, head.z - 1);
     }
     if (L.state === 'ready') {
-      L.dwell = on ? L.dwell + dt : 0;
+      L.dwell = on && !this.seated ? L.dwell + dt : 0; // seated waits for the Ride up button
       if (L.dwell > 1.5) { L.state = 'rising'; L.t = 0; this.setGuide('Hold on! Going up…'); this.audio.cueLift(); }
     } else if (L.state === 'rising') {
       if (on) {
@@ -1408,7 +1419,7 @@ export class Game {
       const clasp = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.16, 0.04), goldM); clasp.position.set(0, 0.45, 0.31); g.add(clasp);
     }
     const glow = new THREE.PointLight(0xffd27a, 0, 1.5); glow.position.set(0, 0.7, 0); g.add(glow);
-    const s = big ? 1.1 : 0.7;
+    const s = big ? 1.1 : this.seated ? 0.4 : 0.7;
     g.scale.setScalar(s);
     const [tName, tColor] = big ? ['Crown of Numeria', 0xffd700] : TREASURES[i % TREASURES.length];
     const prize = big ? this.makeCrown() : new THREE.Mesh(new THREE.OctahedronGeometry(0.1), new THREE.MeshStandardMaterial({ color: tColor, emissive: tColor, emissiveIntensity: 0.5, metalness: 0.3, roughness: 0.15 }));
@@ -1446,7 +1457,8 @@ export class Game {
     const head = this.headPos(), pos = chest.group.getWorldPosition(new THREE.Vector3());
     const toCenter = new THREE.Vector3(-pos.x, 0, -pos.z).normalize();
     const p = pos.clone().addScaledVector(toCenter, 0.55);
-    const panel = new Panel(this, { title: 'Treasure Chest', count: 1, width: 0.7, doneText: `You found a\n${chest.tName}!`, onSolved: () => this.openChest(chest) });
+    const panel = new Panel(this, { title: 'Treasure Chest', count: 1, width: this.seated ? SEAT_PANEL_W : 0.7, doneText: `You found a\n${chest.tName}!`, onSolved: () => this.openChest(chest) });
+    panel.chestPanel = true; panel.floor = this.level;
     panel.mesh.position.set(p.x, fy(this.level) + this.panelH + 0.1, p.z);
     panel.mesh.lookAt(head.x, panel.mesh.position.y, head.z);
     panel.mesh.scale.setScalar(0.01);
@@ -1484,7 +1496,7 @@ export class Game {
     chest.group.position.set(0, y0, hd - 0.45);
     chest.group.rotation.y = Math.PI;
     chest.q.visible = false;
-    const panel = new Panel(this, { title: 'The Crown of Numeria', count: this.opts.perDoor + 1, defer: true, doneText: 'VICTORY!', onSolved: () => this.openChest(chest) });
+    const panel = new Panel(this, { title: 'The Crown of Numeria', count: this.opts.perDoor + 1, defer: true, doneText: 'VICTORY!', width: this.seated ? SEAT_PANEL_W : 0.8, onSolved: () => this.openChest(chest) });
     panel.mesh.position.set(0, y0 + this.panelH, -hd + 0.2);
     panel.floor = TOP; panel.wallMounted = true;
     this.world.add(panel.mesh); this.panels.push(panel);
@@ -1495,6 +1507,10 @@ export class Game {
 
   makeWelcome() {
     const n = this.opts.name || 'Explorer', hw = this.W / 2, len = Math.min(1.8, this.D - 0.4);
+    if (this.seated) {
+      const s = makeSign(`Welcome to Numeria, ${n}!\nSolve the Magic Lock, then press Ride up. Poke buttons with your finger. Pinch to grab things, and throw them!`, { w: 0.9, h: 0.56, size: 60 });
+      s.position.set(-0.75, 1.45, -0.85); s.lookAt(0, 1.45, 0); this.world.add(s); return;
+    }
     const welcome = makeSign(`Welcome to Numeria, ${n}!\nSolve the Magic Lock, then stand on the glowing square to ride up. Poke buttons with your finger. Pinch to grab things (or use the grip button), and throw them!`, { w: len, h: len * 0.62, size: 60 });
     welcome.position.set(-hw + 0.02, 1.6, 0); welcome.rotation.y = Math.PI / 2; this.world.add(welcome);
   }
@@ -1892,8 +1908,44 @@ export class Game {
 
   // Flat sign buttons (mesh.userData.button = { action, hand? }) that a finger can poke or a ray can press.
   // `hand` names the hand that carries the button (its own fingers can't press it).
-  buttonMeshes() { return [...this.handMenu.buttonList, this.pauseUi?.userData.resume]; }
-  uiButtons() { return (this.paused ? Game.prototype.buttonMeshes.call(this) : this.buttonMeshes()).filter((b) => b && b.userData.button && shown(b)); }
+  menuButtons() { return [...this.handMenu.buttonList, this.pauseUi?.userData.resume]; }
+  buttonMeshes() { return [...this.menuButtons(), this.rideBtn]; }
+  uiButtons() { return (this.paused ? this.menuButtons() : this.buttonMeshes()).filter((b) => b && b.userData.button && shown(b)); }
+
+  // ---------------------------------------------------------- seated play
+  makeSeat() {
+    this.rideBtn = makeSign('Ride up!  ▲', { w: 0.3, h: 0.1, size: 80, bg: '#1f6b3a', fg: '#ffffff' });
+    this.rideBtn.userData.button = { action: () => this.rideUp(), id: 'rideUp' }; this.rideBtn.visible = false;
+    this.world.add(this.rideBtn);
+    const stone = new THREE.MeshStandardMaterial({ color: 0xb8a68a, roughness: 0.9 });
+    for (const ch of this.chests) if (!ch.big) { ch.pedestal = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.13, 1, 16), stone); this.world.add(ch.pedestal); }
+    this.layoutSeated(0);
+  }
+  // Everything she needs sits on an arc around her chair (the seat is the castle's centre, facing the
+  // Magic Lock wall), at heights that follow her seated eye height: the lock panel straight ahead, the
+  // scroll front-left, the gem tray front-right, the floor's chest on a pedestal to her right.
+  layoutSeated(dt = 0) {
+    const eye = clamp(this.headPos().y - this.rig.position.y, 0.85, 1.5);
+    this.seatEye += (eye - this.seatEye) * Math.min(1, dt * 2);
+    const E = this.seatEye, lv = this.level;
+    const spot = (o, deg, r, y, floor = lv) => { const a = (deg * Math.PI) / 180; o.position.set(Math.sin(a) * r, fy(floor) + y, -Math.cos(a) * r); o.lookAt(0, o.position.y, 0); o.updateMatrixWorld(true); };
+    const chestPanel = this.panels.find((p) => p.chestPanel && p.mesh.visible && p.floor === lv);
+    for (const p of this.panels) {
+      if (p.chestPanel) { spot(p.mesh, 0, 0.33, E - 0.25, p.floor); continue; }
+      spot(p.mesh, 0, 0.36, E - 0.27, p.floor); p.mesh.rotateX(-0.1); p.mesh.updateMatrixWorld(true);
+      // a chest's question takes the middle; the lock panel waits behind it
+      if (p.floor === lv && p.state === 'solving') p.mesh.visible = !chestPanel;
+    }
+    if (this.tray) spot(this.tray.group, 52, 0.36, E - 0.42);
+    if (this.scroll) spot(this.scroll.group, -55, 0.38, E - 0.3);
+    const chestY = E - 0.72;
+    for (const ch of this.chests) {
+      if (ch.big) { ch.group.position.set(0, fy(TOP), -1.15); ch.group.rotation.set(0, 0, 0); continue; }
+      spot(ch.group, 80, 0.42, chestY, ch.i);
+      if (ch.pedestal) { ch.pedestal.position.set(ch.group.position.x, fy(ch.i) + chestY / 2, ch.group.position.z); ch.pedestal.scale.y = chestY; }
+    }
+    if (this.rideBtn) { this.rideBtn.visible = this.lift?.state === 'ready' && !chestPanel; spot(this.rideBtn, 0, 0.34, E - 0.4); }
+  }
 
   // ---------------------------------------------------------- pause / recenter / leave
   // Pause freezes the frame loop's updates (animations, physics, the lift, villagers), every sound and
@@ -2093,7 +2145,7 @@ export class Game {
     if (this.welcomeBack && t > 1) { this.welcomeBack = false; this.showBanner(this.level >= TOP ? 'Welcome back to the Tower Top!' : `Welcome back! Floor ${this.level + 1}`); }
     const eye = head.y - this.rig.position.y;
     this.panelH += (clamp(eye - 0.3, 0.75, 1.3) - this.panelH) * Math.min(1, dt * 2);
-    for (const p of this.panels) { if (p.wallMounted) p.mesh.position.y = fy(p.floor) + this.panelH + (p.lift || 0); p.update(); }
+    for (const p of this.panels) { if (p.wallMounted && !this.seated) p.mesh.position.y = fy(p.floor) + this.panelH + (p.lift || 0); p.update(); }
     this.updateLift(dt, head);
     const onFloor = Math.floor(head.y / FH); // only the floors she can see get their furniture drawn
     this.decor.forEach((g, k) => { if (g) g.visible = Math.abs(k - onFloor) <= 1; });
@@ -2127,7 +2179,8 @@ export class Game {
     this.updatePointers(dt, tips);
     this.props.update(dt, t, head, tips);
     if (this.tray) { this.tray.place(this.level, fy(this.level), this.W, this.D, this.panelH); this.tray.updateHeld(); }
-    if (this.scroll) { this.scroll.place(this.level, fy(this.level), this.W, this.D, this.panelH); this.scroll.update(dt); }
+    if (this.scroll) { this.scroll.place(this.level, fy(this.level), this.seated ? 1.9 : this.W, this.D, this.panelH); this.scroll.update(dt); }
+    if (this.seated) this.layoutSeated(dt);
     const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(headQ), up = new THREE.Vector3(0, 1, 0).applyQuaternion(headQ);
     this.audio.setListener(head, fwd, up);
     this.ambience(dt, t, head);

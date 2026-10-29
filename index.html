@@ -82,6 +82,7 @@
   .fam .dot { width: 54px; height: 54px; border-radius: 50%; margin: 0 auto 6px; display: grid; place-items: center; font-size: 26px; font-weight: bold; border: 3px solid #ffd54a; }
   .fam b { display: block; font-size: 20px; } .fam small { color: #cfc2f0; }
   .fam.on { border-color: #ffd54a; background: #4a3480; }
+  .seatPick { text-align: center; font-size: 18px; margin: 4px 0 10px; } .seatPick input { width: 22px; height: 22px; vertical-align: middle; }
   .playRow { display: flex; gap: 10px; flex-wrap: wrap; } .playRow .go { flex: 2; min-width: 220px; } .playRow #deskBtn { flex: 1; min-width: 160px; }
   details#parent { background: rgba(255,255,255,0.05); border: 2px dashed rgba(224,184,74,0.35); border-radius: 18px; padding: 10px 14px; margin: 16px 0; }
   details#parent > summary { cursor: pointer; font-size: 18px; color: #ffe9a8; padding: 4px; }
@@ -97,6 +98,7 @@
   <section id="quick" style="display:none;text-align:center">
     <h2 id="quickHi" style="font-size:28px"></h2>
     <div class="chips modeChips" style="justify-content:center;margin:8px 0"><button class="chip" data-mode="kingdom">👑 My Kingdom (see my room)</button><button class="chip" data-mode="castle">🏰 Castle Climb (all VR)</button></div>
+    <label class="seatPick"><input type="checkbox" id="quickSeated"> 🪑 Play sitting down</label>
     <button class="go" id="quickVr" disabled>Checking for VR…</button>
     <p class="note"><small class="link" id="quickEdit">grown-up settings or homework</small></p>
   </section>
@@ -126,6 +128,7 @@
   </section>
 
   <div class="chips modeChips" style="justify-content:center;margin:8px 0"><button class="chip" data-mode="kingdom">👑 My Kingdom (see my room)</button><button class="chip" data-mode="castle">🏰 Castle Climb (all VR)</button></div>
+  <label class="seatPick"><input type="checkbox" id="seated"> 🪑 Play sitting down (no walking: everything comes within reach)</label>
   <div class="playRow">
     <button class="go" id="vrBtn" disabled>Checking for VR…</button>
     <button class="go" id="deskBtn">Play on this screen</button>
@@ -307,6 +310,11 @@ function checkHomework() {
   $('hwStatus').textContent = `${problems.length} homework problem${problems.length === 1 ? '' : 's'} ready for grade ${grade}.` + (errors.length ? `\n${errors.join('\n')}` : '');
   $('hwStatus').className = errors.length ? 'err' : 'ok';
 }
+// "Play sitting down": one setting shown on both the full setup and the bookmark screen
+let seatedFromUrl = false, seatedTouched = false;
+function setSeated(on) { $('seated').checked = $('quickSeated').checked = !!on; }
+$('seated').onchange = () => { setSeated($('seated').checked); seatedTouched = true; };
+$('quickSeated').onchange = () => { setSeated($('quickSeated').checked); seatedTouched = true; };
 function loadProfile(name) {
   const s = store.get(profileKey(name), null);
   if (!s) return;
@@ -317,6 +325,7 @@ function loadProfile(name) {
   renderAvatarPicker(); $('music').value = String(s.music ?? 0.35);
   $('autoRead').checked = s.autoRead ?? s.grade === 2;
   // the old 2.5 m default becomes full-room play; deliberate other sizes stay
+  setSeated(!!s.seated);
   $('perDoor').value = String(s.perDoor || 2); $('roomSize').value = !s.roomSize || (s.roomSize === '2.5' && !s.roomChosen) ? 'room' : s.roomSize;
   setGrade(s.grade, s.moduleIds); setMode(s.mode);
   renderResume(); $('report').innerHTML = ''; $('missedToHw').style.display = 'none'; $('booklet').innerHTML = ''; $('bookletNote').textContent = '';
@@ -340,8 +349,10 @@ function collect() {
   const { problems: hw, errors } = parseHomework($('homework').value, grade);
   if (errors.length) { alert(`Please fix the homework before starting:\n${errors.join('\n')}`); return null; }
   if ($('hwOnly').checked && !hw.length) { alert('Add at least one valid homework problem for this grade, or turn off homework only.'); return null; }
-  const settings = { name, grade, moduleIds, perDoor: Number($('perDoor').value), roomSize: $('roomSize').value, roomChosen: true, remeasure: $('remeasure').checked, avatar: { ...avatar }, music: Number($('music').value), autoRead: $('autoRead').checked, homework: $('homework').value, homeworkOnly: $('hwOnly').checked, mode };
-  store.set(profileKey(name), { ...settings, remeasure: false }); // re-measuring is a one-off
+  const settings = { name, grade, moduleIds, perDoor: Number($('perDoor').value), roomSize: $('roomSize').value, roomChosen: true, remeasure: $('remeasure').checked, avatar: { ...avatar }, music: Number($('music').value), autoRead: $('autoRead').checked, homework: $('homework').value, homeworkOnly: $('hwOnly').checked, mode, seated: $('seated').checked };
+  // re-measuring is a one-off; a ?seated= link applies to this visit only, unless the box was ticked by hand
+  const keepSeated = seatedFromUrl && !seatedTouched ? !!store.get(profileKey(name), {})?.seated : settings.seated;
+  store.set(profileKey(name), { ...settings, remeasure: false, seated: keepSeated });
   const names = store.get('mathcastle.profiles', []);
   if (!names.some((n) => n.toLowerCase() === name.toLowerCase())) store.set('mathcastle.profiles', [...names, name]);
   store.set('mathcastle.last', name);
@@ -557,6 +568,8 @@ if (qp) {
   const last = store.get('mathcastle.last', null);
   if (last) loadProfile(last);
 }
+// ?seated=1 (or 0) picks sitting / standing for this visit; without it the saved choice (standing by default) stays
+{ const qs = params.get('seated'); if (qs === '1' || qs === '0') { setSeated(qs === '1'); seatedFromUrl = true; } }
 if (!$('homework').value) fetch('homework.txt').then((r) => (r.ok ? r.text() : '')).then((t) => { if (t && !$('homework').value) { $('homework').value = t; checkHomework(); } }).catch(() => {});
 
 if (navigator.xr) {
