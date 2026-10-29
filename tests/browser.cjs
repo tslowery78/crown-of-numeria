@@ -167,7 +167,106 @@ const url=process.argv[2]||'http://127.0.0.1:8765/';
   assert.equal(kingdom.shrunkScale,8);assert.equal(kingdom.islandTopY,0);assert.ok(kingdom.scrollHidden&&kingdom.shopHidden);assert.ok(kingdom.villagers>=2);assert.equal(kingdom.back,true);
   await page.reload();await page.locator('#deskBtn').click();await page.waitForFunction(()=>window.__castle?.shop&&window.__castle.buildings);
   kingdom.restored=await page.evaluate(()=>__castle.buildings.map(b=>b.id).join());assert.equal(kingdom.restored,'cottage');assert.deepEqual(errors,[]);
-  const result={url,game,grade4,kingdom,xr,errors,hiddenPreviewDraws:0};
+  // ---- Hands-first: stub hand input sources (joint poses + 'connected' events) drive the real input code.
+  const installHands=()=>page.evaluate(async()=>{
+   const T=await import('three'),g=__castle;g.renderer.setAnimationLoop(null);const v=(x=0,y=0,z=0)=>new T.Vector3(x,y,z);
+   const H=window.__H={T,g,v,sleep:ms=>new Promise(r=>setTimeout(r,ms))};
+   H.xrOn=()=>{H.render??=g.renderer.render;g.renderer.render=()=>{};g.renderer.xr.isPresenting=true;};
+   H.xrOff=()=>{g.renderer.xr.isPresenting=false;if(H.render)g.renderer.render=H.render;};
+   // a tracked hand from its wrist position, finger direction and palm normal (world space)
+   H.hand=(ptr,side,wrist,along,normal)=>{
+    along=along.clone().normalize();normal=normal.clone().normalize();
+    const across=side==='left'?v().crossVectors(normal,along):v().crossVectors(along,normal);
+    const at=(a,c)=>wrist.clone().addScaledVector(along,a).addScaledVector(across,c);
+    const pts={wrist,'middle-finger-metacarpal':at(.07,0),'index-finger-metacarpal':at(.065,.025),'pinky-finger-metacarpal':at(.06,-.03),'index-finger-tip':at(.17,.02),'thumb-tip':at(.1,.06)};
+    if(!ptr.src||ptr.src.handedness!==side||!ptr.src.hand)ptr.c.dispatchEvent({type:'connected',data:{handedness:side,hand:new Map(),gamepad:null,profiles:[]}});
+    g.scene.updateMatrixWorld(true);ptr.hand.joints??={};
+    for(const [n,p] of Object.entries(pts)){let j=ptr.hand.joints[n];if(!j){j=new T.Group();j.jointRadius=.008;ptr.hand.add(j);ptr.hand.joints[n]=j;}j.visible=true;j.position.copy(ptr.hand.worldToLocal(p.clone()));}
+    ptr.hand.updateMatrixWorld(true);
+   };
+   H.controller=(ptr,side,buttons=[])=>ptr.c.dispatchEvent({type:'connected',data:{handedness:side,gamepad:{buttons,axes:[0,0,0,0]},profiles:[]}});
+   // point a hand / controller ray from `from` at `at` (the ray is the -Z axis)
+   // (XR controller spaces have matrixAutoUpdate off: the headset writes their matrices, so the stub does too)
+   H.aim=(ptr,from,at)=>{g.scene.updateMatrixWorld(true);ptr.c.position.copy(g.rig.worldToLocal(from.clone()));ptr.c.updateMatrix();ptr.c.updateMatrixWorld(true);ptr.c.lookAt(from.clone().multiplyScalar(2).sub(at));ptr.c.updateMatrix();ptr.c.updateMatrixWorld(true);};
+   // push a fingertip through a flat button, front to back
+   H.pokeThrough=(ptr,mesh)=>{g.scene.updateMatrixWorld(true);const p=mesh.getWorldPosition(v()),n=v(0,0,1).transformDirection(mesh.matrixWorld);ptr.cool=0;g.poke(ptr,p.clone().addScaledVector(n,.03),.016);g.poke(ptr,p.clone().addScaledVector(n,-.01),.016);};
+  });
+  await page.goto(url+'?player=HandsCastle&grade=2');await page.locator('#quickEdit').click();
+  await page.evaluate(()=>document.querySelector('.modeChips .chip[data-mode=castle]').click());await page.locator('#deskBtn').click();await page.waitForFunction(()=>window.__castle?.props);
+  await installHands();
+  const hands=await page.evaluate(async()=>{
+   const {g,v,sleep}=__H,H=__H,r={},[L,R]=g.pointers;H.xrOn();
+   g.camera.position.set(0,1.3,0);g.camera.rotation.set(0,0,0);g.scene.updateMatrixWorld(true);
+   const head=g.headPos(),wrist=v(-.12,head.y-.25,head.z-.35),palmToHead=head.clone().sub(wrist);
+   // wrist HUD: left palm towards her eyes shows the gem counter at the wrist; turned away hides it
+   H.hand(L,'left',wrist,v(0,1,0),palmToHead);g.handMenu.update(.016);
+   r.hudShown=g.handMenu.group.visible&&g.handMenu.group.parent===g.scene&&g.hudMesh.parent===g.handMenu.group;
+   r.hudNearWrist=+g.handMenu.group.position.distanceTo(wrist).toFixed(3);
+   H.hand(L,'left',wrist,v(0,1,0),v(0,0,-1));g.handMenu.update(.5);r.hudHiddenAway=!g.handMenu.group.visible;
+   // controllers: the counter rides the left controller, leaves it on disconnect, and never follows a right hand into that slot
+   H.controller(L,'left');g.handMenu.update(.016);r.hudOnController=g.handMenu.group.parent===L.c&&g.handMenu.group.visible;
+   L.c.dispatchEvent({type:'disconnected',data:L.src});r.hudOffOnDisconnect=g.handMenu.group.parent===null;
+   H.hand(L,'right',v(.2,1,-.3),v(0,1,0),v(-1,0,0));g.handMenu.update(.016);r.hudNotOnRightHand=g.handMenu.group.parent!==L.c&&!g.handMenu.group.visible;
+   L.c.dispatchEvent({type:'disconnected',data:L.src});
+   // hand menu: the left hand can't press its own menu; the right index finger pokes Pause
+   H.hand(L,'left',wrist,v(0,1,0),palmToHead);g.handMenu.update(.016);
+   r.menuButtons=g.uiButtons().map(b=>b.userData.button.id).filter(Boolean).sort().join();
+   H.pokeThrough(L,g.handMenu.byId.pause);r.leftOwnMenuIgnored=!g.paused;
+   H.hand(R,'right',v(.15,head.y-.3,head.z-.3),v(0,1,0),v(-1,0,0));
+   const panel=g.locks[0].panel;panel.busyUntil=performance.now()+1000;const busy0=panel.busyUntil;
+   H.pokeThrough(R,g.handMenu.byId.pause);r.pausedByPoke=!!g.paused;r.menuShowsResume=g.handMenu.byId.resume.visible&&!g.handMenu.byId.pause.visible;
+   let prog=0;g.animate(1,t=>{prog=t;});const lift0=g.rig.position.y;
+   H.xrOff();for(let k=0;k<4;k++){await sleep(60);g.frame();}
+   r.audioSuspended=g.audio.ctx?g.audio.ctx.state==='suspended':'no audio';r.frozen=prog===0&&g.rig.position.y===lift0;
+   // resume with a ray + pinch on the Resume button in front of her
+   H.xrOn();g.updatePauseUi();const rb=g.pauseUi.userData.resume;g.scene.updateMatrixWorld(true);
+   r.resumeInReach=+rb.getWorldPosition(v()).distanceTo(head).toFixed(3);
+   H.aim(R,v(.12,head.y-.2,head.z-.05),rb.getWorldPosition(v()));g.pausedFrame(.016);r.rayOnResume=R.hit?.type==='button';
+   R.c.dispatchEvent({type:'selectstart'});R.c.dispatchEvent({type:'selectend'});
+   r.resumed=!g.paused;r.busyShifted=panel.busyUntil-busy0>=200;
+   H.xrOff();for(let k=0;k<3;k++){await sleep(60);g.frame();}r.runsAgain=prog>0;await sleep(100);
+   r.audioRunning=g.audio.ctx?g.audio.ctx.state==='running':'no audio';
+   // pinch-hold room corners: a stray pinch does nothing, a 0.5 s hold marks, the controller trigger is instant
+   H.xrOn();g.beginMeasure('local-floor',false);const pts=()=>g.roomMeasure.points.length;
+   H.hand(L,'left',v(1,1,-1),v(0,0,-1),v(0,-1,0));
+   L.c.dispatchEvent({type:'selectstart'});r.cornerNotInstant=pts()===0&&!!L.pinchHold;
+   g.updatePinchHolds(.2);const dr=g.holdRing.userData.fill.geometry.drawRange.count;r.fillRing=g.holdRing.visible&&dr>0&&dr<g.holdRing.userData.fill.geometry.index.count;
+   L.c.dispatchEvent({type:'selectend'});g.updatePinchHolds(.6);r.strayPinchIgnored=pts()===0&&!g.holdRing.visible;
+   L.c.dispatchEvent({type:'selectstart'});g.updatePinchHolds(.3);g.updatePinchHolds(.3);r.heldPinchMarks=pts()===1;
+   H.controller(L,'left');L.c.dispatchEvent({type:'selectstart'});L.c.dispatchEvent({type:'selectend'});r.triggerInstant=pts()===2;
+   H.xrOff();return r;});
+  assert.deepEqual(hands,{...hands,hudShown:true,hudHiddenAway:true,hudOnController:true,hudOffOnDisconnect:true,hudNotOnRightHand:true,menuButtons:'leave,pause,recenter',leftOwnMenuIgnored:true,pausedByPoke:true,menuShowsResume:true,frozen:true,rayOnResume:true,resumed:true,busyShifted:true,runsAgain:true,cornerNotInstant:true,fillRing:true,strayPinchIgnored:true,heldPinchMarks:true,triggerInstant:true});
+  assert.ok(hands.hudNearWrist<.15,'hud distance '+hands.hudNearWrist);assert.ok(hands.resumeInReach<.6,'resume '+hands.resumeInReach);
+  if(hands.audioSuspended!=='no audio'){assert.equal(hands.audioSuspended,true);assert.equal(hands.audioRunning,true);}
+  // My Kingdom with hands: poke "Shrink down", turn with the arrow buttons, pinch-aim-release to teleport (kept on the island)
+  await page.goto(url+'?player=HandsKingdom&grade=2');await page.locator('#quickEdit').click();
+  await page.evaluate(()=>document.querySelector('.modeChips .chip[data-mode=kingdom]').click());
+  await page.locator('#deskBtn').click();await page.waitForFunction(()=>window.__castle?.shop&&window.__castle.buildings);
+  await installHands();
+  const kingdomHands=await page.evaluate(async()=>{
+   const {g,v}=__H,H=__H,r={},[L,R]=g.pointers;H.xrOn();
+   g.camera.position.set(0,1.3,0);g.camera.rotation.set(0,0,0);g.scene.updateMatrixWorld(true);
+   H.hand(R,'right',g.headPos().add(v(.2,-.4,-.3)),v(0,1,0),v(-1,0,0));
+   H.pokeThrough(R,g.shrinkBtn);r.pokedShrink=g.visiting;
+   let head=g.headPos();g.updateGrowButton(head);g.scene.updateMatrixWorld(true);
+   const yaw0=g.rig.rotation.y;H.pokeThrough(R,g.turnBtns[1]);
+   r.turnedRight=+(g.rig.rotation.y-yaw0).toFixed(6)===+(-Math.PI/6).toFixed(6);r.turnKeepsHead=g.headPos().distanceTo(head)<1e-9;
+   H.pokeThrough(R,g.turnBtns[0]);r.turnedBack=Math.abs(g.rig.rotation.y-yaw0)<1e-9;
+   // teleport: pinch (selectstart), aim at the meadow 3 m ahead, let go
+   head=g.headPos();const fwd=g.camera.getWorldDirection(v()).setY(0).normalize(),at=head.clone().setY(0).addScaledVector(fwd,3);
+   H.aim(R,head.clone().add(v(.1,-.35,0)),at);R.hit=null;R.c.dispatchEvent({type:'selectstart'});
+   g.updateTeleport();r.ring=g.teleRing.visible&&g.teleRing.position.clone().setY(0).distanceTo(at)<1e-6;
+   R.c.dispatchEvent({type:'selectend'});r.teleported=g.headPos().setY(0).distanceTo(at)<1e-6&&!g.teleRing.visible;
+   // long hops stay on the island
+   const centre=()=>g.islandTop.getWorldPosition(v()).setY(0),maxR=.86*8-.6;let worst=0;
+   for(let k=0;k<4;k++){head=g.headPos();const f=g.camera.getWorldDirection(v()).setY(0).normalize();H.aim(R,head.clone().add(v(.1,-.35,0)),head.clone().setY(.3).addScaledVector(f,40));R.hit=null;R.c.dispatchEvent({type:'selectstart'});g.updateTeleport();R.c.dispatchEvent({type:'selectend'});worst=Math.max(worst,g.headPos().setY(0).distanceTo(centre()));}
+   r.keptOnIsland=worst<=maxR+1e-6;r.worst=+worst.toFixed(3);
+   // pause works here too
+   g.setPaused(true);H.xrOff();g.frame();r.kingdomPaused=!!g.paused;g.setPaused(false);
+   g.growBack();return r;});
+  assert.deepEqual(kingdomHands,{...kingdomHands,pokedShrink:true,turnedRight:true,turnKeepsHead:true,turnedBack:true,ring:true,teleported:true,keptOnIsland:true,kingdomPaused:true});
+  assert.deepEqual(errors,[]);
+  const result={url,game,grade4,kingdom,xr,hands,kingdomHands,errors,hiddenPreviewDraws:0};
   if(process.env.TEST_OUTPUT)fs.writeFileSync(process.env.TEST_OUTPUT+'/browser-result.json',JSON.stringify(result,null,2));
   console.log(JSON.stringify(result,null,2));
  } finally {await browser.close();}
