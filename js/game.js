@@ -525,7 +525,7 @@ export class Game {
   // No reset transform: pause re-centring until she stands in the middle and pinches.
   askForCenter() {
     this.centerPrompt = true;
-    this.centerSign ??= makeSign('Walk to the middle of your play space, face the Magic Lock wall, then pinch or pull the trigger.', { w: 1.1, h: 0.36, size: 64, bg: '#1f2a44', border: '#7fb2ff', fg: '#e8f0ff' });
+    this.centerSign ??= makeSign('Walk to the middle of your play space and face the Magic Lock wall. Then pinch and hold until the ring fills (or pull the trigger).', { w: 1.1, h: 0.36, size: 64, bg: '#1f2a44', border: '#7fb2ff', fg: '#e8f0ff' });
     this.scene.add(this.centerSign);
   }
   confirmCenter() {
@@ -566,9 +566,9 @@ export class Game {
   }
   measureStepText() {
     const m = this.roomMeasure, n = m.points.length;
-    const steps = ['Walk to the FRONT-LEFT corner of your clear space (the wall where the Magic Lock will go). Pull the trigger or pinch.',
-      'Now walk to the FRONT-RIGHT corner and pull the trigger or pinch.',
-      'Now walk to the BACK of your space and pull the trigger or pinch.'];
+    const steps = ['Walk to the FRONT-LEFT corner of your clear space (the wall where the Magic Lock will go). Pinch and hold until the ring fills (or pull the trigger).',
+      'Now walk to the FRONT-RIGHT corner. Pinch and hold (or pull the trigger).',
+      'Now walk to the BACK of your space. Pinch and hold (or pull the trigger).'];
     return (m.msg ? m.msg + '\n' : '') + (m.reanchor && n === 0 ? 'The castle moved. ' : '') + steps[n];
   }
   updateMeasureSign() {
@@ -1492,7 +1492,7 @@ export class Game {
 
   makeWelcome() {
     const n = this.opts.name || 'Explorer', hw = this.W / 2, len = Math.min(1.8, this.D - 0.4);
-    const welcome = makeSign(`Welcome to Numeria, ${n}!\nSolve the Magic Lock, then stand on the glowing square to ride up. Touch buttons with your finger. Grab things with a pinch or the grip button, and throw them!`, { w: len, h: len * 0.62, size: 60 });
+    const welcome = makeSign(`Welcome to Numeria, ${n}!\nSolve the Magic Lock, then stand on the glowing square to ride up. Poke buttons with your finger. Pinch to grab things (or use the grip button), and throw them!`, { w: len, h: len * 0.62, size: 60 });
     welcome.position.set(-hw + 0.02, 1.6, 0); welcome.rotation.y = Math.PI / 2; this.world.add(welcome);
   }
 
