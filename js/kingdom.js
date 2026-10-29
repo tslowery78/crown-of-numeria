@@ -427,6 +427,12 @@ export class Kingdom extends Game {
       this.growBtn = makeSign('Grow big again', { w: 0.46, h: 0.1, size: 70, bg: '#2b1a4a', fg: '#ffe9a8' });
       this.growBtn.userData.button = { action: () => this.growBack() };
       env.add(this.growBtn);
+      // turn buttons either side of it (hands have no thumbstick): 30 degrees per press
+      this.turnBtns = [['←', 1], ['→', -1]].map(([label, dir]) => {
+        const b = makeSign(label, { w: 0.12, h: 0.1, size: 90, bg: '#2b1a4a', fg: '#ffe9a8', px: 256 });
+        b.position.set(-dir * 0.31, 0, 0); b.userData.button = { action: () => this.snapTurn(dir), id: dir > 0 ? 'turnLeft' : 'turnRight' };
+        this.growBtn.add(b); return b;
+      });
       this.scene.add(env);
     }
     this.visitEnv.visible = on;
@@ -451,12 +457,18 @@ export class Kingdom extends Game {
         this.rig.position.addScaledVector(fwd, -y * 1.6 * dt).addScaledVector(right, x * 1.6 * dt);
       }
       if (ptr.src.handedness === 'right') {
-        if (Math.abs(x) > 0.7 && !ptr.turned) { ptr.turned = true; const head = this.headPos(), a = -Math.sign(x) * Math.PI / 6; this.rig.position.sub(head).applyAxisAngle(new THREE.Vector3(0, 1, 0), a).add(head); this.rig.rotation.y += a; }
+        if (Math.abs(x) > 0.7 && !ptr.turned) { ptr.turned = true; this.snapTurn(-Math.sign(x)); }
         if (Math.abs(x) < 0.3) ptr.turned = false;
       }
     }
   }
 
+  // turn 30 degrees about her head: dir +1 = left, -1 = right
+  snapTurn(dir) {
+    const head = this.headPos(), a = dir * Math.PI / 6;
+    this.rig.position.sub(head).applyAxisAngle(new THREE.Vector3(0, 1, 0), a).add(head); this.rig.rotation.y += a;
+    this.rig.updateMatrixWorld(true);
+  }
   // Pinch-to-teleport while small: pinch (or trigger) and hold to aim the hand's ray at the meadow,
   // a ring shows where she will land, letting go jumps there. Hops are capped and kept on the island.
   teleportTarget(ptr) {
@@ -684,7 +696,7 @@ export class Kingdom extends Game {
   // ------------------------------------------------------------ pointing
   // pokeable / pinchable sign buttons ("Move my kingdom here" only in the headset)
   buttonMeshes() {
-    return [...super.buttonMeshes(), this.shrinkBtn, this.renderer.xr.isPresenting ? this.moveBtn : null, this.growBtn];
+    return [...super.buttonMeshes(), this.shrinkBtn, this.renderer.xr.isPresenting ? this.moveBtn : null, this.growBtn, ...(this.turnBtns || [])];
   }
   castFrom(origin, dir) {
     this.raycaster.set(origin, dir);
