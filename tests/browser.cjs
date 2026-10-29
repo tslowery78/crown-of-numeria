@@ -265,8 +265,80 @@ const url=process.argv[2]||'http://127.0.0.1:8765/';
    g.setPaused(true);H.xrOff();g.frame();r.kingdomPaused=!!g.paused;g.setPaused(false);
    g.growBack();return r;});
   assert.deepEqual(kingdomHands,{...kingdomHands,pokedShrink:true,turnedRight:true,turnKeepsHead:true,turnedBack:true,ring:true,teleported:true,keptOnIsland:true,kingdomPaused:true});
+  // ---- Seated play (?seated=1): no measuring or walking; every interactable within ~0.6 m of her shoulder.
+  // Reach is measured from a seated shoulder point (eye height - 0.25 m, 5 cm behind the eyes); "behind" counts points behind her.
+  const seatHelpers=()=>page.evaluate(()=>{const {g,v}=__H;
+   __H.reach=(pts)=>{const head=g.headPos(),S=head.clone().add(v(0,-.25,.05));let max=0,behind=0;for(const p of pts){max=Math.max(max,p.distanceTo(S));if(p.z>head.z+.05)behind++;}return {max:+max.toFixed(3),behind,n:pts.length};};
+   __H.panelPts=(p)=>{p.mesh.updateMatrixWorld(true);return p.buttons.map(b=>p.mesh.localToWorld(v(((b.x+b.w/2)/1024-.5)*p.w,(.5-(b.y+b.h/2)/1280)*p.h,0)));};
+   __H.corners=(m)=>{m.updateMatrixWorld(true);return [[-.5,-.5],[.5,-.5],[-.5,.5],[.5,.5]].map(([x,y])=>m.localToWorld(v(x,y,0)));};});
+  await page.goto(url+'?player=HandsCastle&grade=2');
+  const standingDefault=await page.locator('#quickSeated').isChecked();
+  await page.goto(url+'?player=SeatedCastle&grade=2&seated=1');
+  const seatedBoxes=[await page.locator('#quickSeated').isChecked(),await page.locator('#seated').isChecked()];
+  await page.locator('#quickEdit').click();await page.evaluate(()=>document.querySelector('.modeChips .chip[data-mode=castle]').click());await page.locator('#deskBtn').click();await page.waitForFunction(()=>window.__castle?.props);
+  await installHands();await seatHelpers();
+  const seated=await page.evaluate(async()=>{
+   const {g,v}=__H,H=__H,r={opts:!!g.opts.seated,size:[g.W,g.D]},[L,R]=g.pointers,TOP=5;
+   const sit=()=>{g.camera.position.set(0,1.15,0);g.camera.rotation.set(0,0,0);g.seatEye=1.15;g.scene.updateMatrixWorld(true);g.layoutSeated(0);g.scene.updateMatrixWorld(true);};
+   sit();const panel=g.locks[0].panel;
+   panel.problem={text:'12 + 7 = ?',answer:'19',hint:'count on',homework:true};panel.draw();r.keypad=H.reach(H.panelPts(panel));
+   panel.problem={text:'Even or odd?',answer:'odd',hint:'',choices:['even','odd']};panel.draw();r.choices=H.reach(H.panelPts(panel));panel.newProblem();
+   r.scroll=H.reach(H.corners(g.scroll.mesh));
+   g.tray.bind(panel,{manip:{layout:'ten',start:3,value:'total'}});sit();r.tray=H.reach([...g.tray.slots.map(s=>g.tray.slotWorld(s)),g.tray.bowlWorld()]);
+   const ch=g.chests[0],box=new H.T.Box3().setFromObject(ch.group.children[0]),S=g.headPos().add(v(0,-.25,.05));
+   r.chestTouch=+box.distanceToPoint(S).toFixed(3);r.chestCentre=H.reach([box.getCenter(v())]);
+   // touching the chest opens its question in the middle; the lock panel waits behind it
+   g.openChestPanel(ch);const cp=ch.panel;cp.mesh.scale.setScalar(1);sit();r.chestPanel=H.reach(H.panelPts(cp));r.lockHiddenForChest=!panel.mesh.visible;
+   cp.state='done';cp.mesh.visible=false;sit();r.lockBack=panel.mesh.visible;
+   // solve the lock, then the Ride up button (poked by a finger) lifts her even with her head off the square
+   while(panel.state==='solving'){panel.busyUntil=0;panel.input='';if(panel.problem.choices)panel.pressKey('choice:'+panel.problem.answer);else{for(const k of panel.problem.answer)panel.pressKey(k);panel.pressKey('OK');}panel.busyUntil=0;panel.update();}
+   sit();r.rideShown=g.rideBtn.visible&&g.lift.state==='ready';r.ride=H.reach([g.rideBtn.getWorldPosition(v())]);
+   H.hand(R,'right',v(.15,.85,-.2),v(0,1,0),v(-1,0,0));H.pokeThrough(R,g.rideBtn);r.rising=g.lift.state==='rising';
+   const off=v(.9,1.15,.9);for(let i=0;i<140;i++)g.updateLift(.05,off);r.level=g.level;
+   sit();r.floor2=H.reach(H.panelPts(g.locks[1].panel));r.chest2=H.reach([new H.T.Box3().setFromObject(g.chests[1].group.children[0]).getCenter(v())]);
+   g.level=TOP;g.rig.position.y=18;const fin=g.finalChest.panel;fin.problem={text:'6 x 7 = ?',answer:'42',hint:'',homework:true};fin.draw();sit();r.finale=H.reach(H.panelPts(fin));
+   r.welcome=g.world.children.some(o=>o.isMesh&&o.position.x===-.75);
+   // in the headset: "My whole room" + seated skips corner measuring and centres on her seat; recentring re-centres
+   const original=navigator.xr,methods={setSession:g.renderer.xr.setSession,getReferenceSpace:g.renderer.xr.getReferenceSpace,setReferenceSpace:g.renderer.xr.setReferenceSpace};let ref,session;
+   Object.defineProperty(navigator,'xr',{configurable:true,value:{requestSession:async()=>{ref=new EventTarget();session=new EventTarget();session.requestReferenceSpace=async()=>ref;session.end=async()=>{session.dispatchEvent(new Event('end'));};return session;}}});
+   g.renderer.xr.setSession=async()=>{};g.renderer.xr.getReferenceSpace=()=>ref;g.renderer.xr.setReferenceSpace=()=>{};
+   g.opts.roomSize='room';await g.enterVR();r.vr={measuring:!!g.roomMeasure,calibrating:!!g.xrCalibrating,size:[g.W,g.D],type:g.fitInfo.type};
+   g.xrCalibrating=false;ref.dispatchEvent(new Event('reset'));r.vr.resetRecentres=!!g.xrCalibrating&&!g.centerPrompt;
+   session.dispatchEvent(new Event('visibilitychange'));r.vr.hiddenPauses=!!g.paused;await session.end();r.vr.endUnpauses=!g.paused;
+   Object.assign(g.renderer.xr,methods);Object.defineProperty(navigator,'xr',{configurable:true,value:original});
+   return r;});
+  if(process.env.TEST_OUTPUT){await page.evaluate(()=>{const g=__castle;g.camera.position.set(0,1.15,0);g.camera.rotation.set(-.35,0,0);g.renderer.render(g.scene,g.camera);});await page.screenshot({path:process.env.TEST_OUTPUT+'/seated-castle.png'});}
+  await page.goto(url+'?player=SeatedCastle&grade=2');const seatedNotSticky=!(await page.locator('#quickSeated').isChecked());
+  assert.equal(standingDefault,false);assert.deepEqual(seatedBoxes,[true,true]);assert.equal(seatedNotSticky,true);
+  assert.deepEqual({...seated,keypad:0,choices:0,scroll:0,tray:0,chestCentre:0,chestTouch:0,chestPanel:0,ride:0,floor2:0,chest2:0,finale:0},{opts:true,size:[3,3],keypad:0,choices:0,scroll:0,tray:0,chestCentre:0,chestTouch:0,chestPanel:0,ride:0,floor2:0,chest2:0,finale:0,lockHiddenForChest:true,lockBack:true,rideShown:true,rising:true,level:1,welcome:true,vr:{measuring:false,calibrating:true,size:[3,3],type:'local-floor',resetRecentres:true,hiddenPauses:true,endUnpauses:true}});
+  for(const k of ['keypad','choices','scroll','tray','chestCentre','chestPanel','ride','floor2','chest2','finale']){assert.ok(seated[k].max<=.62,`seated ${k} reach ${seated[k].max} m`);assert.equal(seated[k].behind,0,`seated ${k} behind her`);}
+  assert.ok(seated.chestTouch<=.5,'chest touch '+seated.chestTouch);
+  // seated My Kingdom: island top at table height just in front of her knees; board, tray, scroll and shop within reach
+  await page.goto(url+'?player=SeatedKingdom&grade=2&seated=1');await page.locator('#quickEdit').click();
+  await page.evaluate(()=>document.querySelector('.modeChips .chip[data-mode=kingdom]').click());
+  await page.locator('#deskBtn').click();await page.waitForFunction(()=>window.__castle?.shop&&window.__castle.buildings);
+  await installHands();await seatHelpers();
+  const seatedKingdom=await page.evaluate(async()=>{
+   const {g,v}=__H,H=__H,r={},[L,R]=g.pointers;
+   g.camera.position.set(0,1.15,0);g.camera.rotation.set(0,0,0);g.scene.updateMatrixWorld(true);
+   const eye=g.world.worldToLocal(g.headPos()).y;g.panelH=Math.min(1.3,Math.max(.6,eye-.3));g.layoutStation();g.scene.updateMatrixWorld(true);
+   const head=g.headPos(),top=g.islandTop.getWorldPosition(v());r.tableTop=+top.y.toFixed(3);r.nearEdge=+(Math.hypot(top.x-head.x,top.z-head.z)-.86).toFixed(3);
+   const b=g.board;if(b.problem&&!b.problem.choices){}else{b.problem={text:'3 + 4 = ?',answer:'7',hint:''};}b.draw();r.board=H.reach(H.panelPts(b));
+   r.shop=H.reach([...g.shop.slots.map(s=>s.hit.getWorldPosition(v())),g.shrinkBtn.getWorldPosition(v()),g.moveBtn.getWorldPosition(v())]);
+   r.scroll=H.reach(H.corners(g.scroll.mesh));
+   g.tray.bind(b,{manip:{layout:'ten',start:3,value:'total'}});g.layoutStation();g.scene.updateMatrixWorld(true);r.tray=H.reach([...g.tray.slots.map(s=>g.tray.slotWorld(s)),g.tray.bowlWorld()]);
+   // shrink with a finger poke, then hop with pinch-to-teleport
+   H.xrOn();H.hand(R,'right',head.clone().add(v(.15,-.4,-.2)),v(0,1,0),v(-1,0,0));H.pokeThrough(R,g.shrinkBtn);r.shrunk=g.visiting;
+   const h2=g.headPos(),at=h2.clone().setY(0).addScaledVector(g.camera.getWorldDirection(v()).setY(0).normalize(),2.5);
+   H.aim(R,h2.clone().add(v(.1,-.3,0)),at);R.hit=null;R.c.dispatchEvent({type:'selectstart'});g.updateTeleport();R.c.dispatchEvent({type:'selectend'});
+   r.teleported=g.headPos().setY(0).distanceTo(at)<1e-6;g.growBack();r.backAtTable=+g.islandTop.getWorldPosition(v()).y.toFixed(3);H.xrOff();
+   return r;});
+  if(process.env.TEST_OUTPUT){await page.evaluate(()=>{const g=__castle;g.camera.position.set(0,1.15,0);g.camera.rotation.set(-.45,0,0);g.renderer.render(g.scene,g.camera);});await page.screenshot({path:process.env.TEST_OUTPUT+'/seated-kingdom.png'});}
+  assert.equal(seatedKingdom.tableTop,.72);assert.equal(seatedKingdom.backAtTable,.72);assert.ok(seatedKingdom.nearEdge>.1&&seatedKingdom.nearEdge<=.35,'near edge '+seatedKingdom.nearEdge);
+  assert.equal(seatedKingdom.shrunk,true);assert.equal(seatedKingdom.teleported,true);
+  for(const k of ['board','shop','scroll','tray']){assert.ok(seatedKingdom[k].max<=.62,`seated kingdom ${k} reach ${seatedKingdom[k].max} m`);assert.equal(seatedKingdom[k].behind,0,`seated kingdom ${k} behind her`);}
   assert.deepEqual(errors,[]);
-  const result={url,game,grade4,kingdom,xr,hands,kingdomHands,errors,hiddenPreviewDraws:0};
+  const result={url,game,grade4,kingdom,xr,hands,kingdomHands,seated,seatedKingdom,errors,hiddenPreviewDraws:0};
   if(process.env.TEST_OUTPUT)fs.writeFileSync(process.env.TEST_OUTPUT+'/browser-result.json',JSON.stringify(result,null,2));
   console.log(JSON.stringify(result,null,2));
  } finally {await browser.close();}

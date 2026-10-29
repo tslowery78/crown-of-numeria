@@ -21,6 +21,9 @@ import { makeFillRing } from './hands.js';
 
 const CELL = 0.2, R = 0.86, TOPY = 0.55, QUEST = 5; // metres: grid cell, island radius, island top height
 const PLAYER_Z = 1.45; // where she stands, in kingdom coordinates (the island centre is the origin)
+// Seated: the island's top sits at table height and its near edge just in front of her knees;
+// the station gathers round her chair within arm's reach.
+const SEAT_Z = 1.12, TABLE_Y = 0.72, SEAT_SHOP = 0.5;
 const VISIT = 8; // "Shrink down!": the kingdom grows 8x, so a cottage is house-sized and villagers are her height
 const PEOPLE = ['female-a', 'male-a', 'female-b', 'male-c', 'female-d', 'male-e'];
 const KEY = (player) => `mathcastle.kingdom.${player}`;
@@ -116,7 +119,8 @@ export class Kingdom extends Game {
     this.buildWorld();
     this.scene.background = new THREE.Color(0xcfe3f5);
     this.desktopRoom();
-    this.rig.position.set(0.1, 0, PLAYER_Z + 0.5); this.camera.rotation.set(-0.5, 0, 0);
+    if (this.seated) { this.rig.position.set(0, 0, this.playerZ); this.camera.rotation.set(-0.35, 0, 0); }
+    else { this.rig.position.set(0.1, 0, PLAYER_Z + 0.5); this.camera.rotation.set(-0.5, 0, 0); }
     this.startAudio();
   }
 
@@ -156,8 +160,9 @@ export class Kingdom extends Game {
   buildWorld() {
     const save = this.loadSave();
     this.W = this.D = 3.2;
+    this.seated = !!this.opts.seated; this.playerZ = this.seated ? SEAT_Z : PLAYER_Z; this.liftY = this.seated ? TABLE_Y - TOPY : 0;
     if (this.world) this.scene.remove(this.world);
-    this.world = new THREE.Group(); this.scene.add(this.world);
+    this.world = new THREE.Group(); this.world.position.y = this.liftY; this.scene.add(this.world);
     const hwDone = save.hw?.key === (this.opts.hwKey || '') ? save.hw.done : [];
     this.source = new ProblemSource({ ...this.opts, homeworkDone: hwDone });
     this.session = { id: Date.now(), start: Date.now(), problems: [], hwDone: hwDone.slice() };
@@ -175,7 +180,7 @@ export class Kingdom extends Game {
     this.buildIsland();
     this.buildShop();
     // the Magic Lock panel becomes the Wizard's quest board, to her front-left
-    const panel = new Panel(this, { title: 'Royal Quest', count: QUEST, width: 0.62, doneText: 'Quest complete!\n+5 bonus gems', defer: true });
+    const panel = new Panel(this, { title: 'Royal Quest', count: QUEST, width: this.seated ? 0.5 : 0.62, doneText: 'Quest complete!\n+5 bonus gems', defer: true });
     panel.wallMounted = true; // her scroll work goes into the answer booklet
     panel.onProblem = (p) => { this.tray.bind(panel, p); this.scroll.setProblem(p.text); this.readAloud(p, 1.0); };
     panel.onSolved = () => this.questComplete(panel);
@@ -183,7 +188,7 @@ export class Kingdom extends Game {
     panel.parchmentArt = this.kingdomArt.parchment?.image;
     this.board = panel; this.panels.push(panel); this.world.add(panel.mesh);
     this.tray = new GemTray(this); this.world.add(this.tray.group); this.tray.place(0, 0, this.W, this.D, this.panelH);
-    this.scroll = new MagicScroll(this); this.world.add(this.scroll.group); this.scroll.place(0, 0, 2.6, this.D, this.panelH);
+    this.scroll = new MagicScroll(this); this.world.add(this.scroll.group); this.scroll.place(0, 0, this.seated ? 1.9 : 2.6, this.D, this.panelH);
     this.layoutStation();
     for (const b of save.built || []) this.placeBuilding(b, false);
     this.villagers = []; this.visiting = false; this.syncVillagers();
@@ -194,8 +199,18 @@ export class Kingdom extends Game {
 
   // Quest board, scroll and gem tray on her left; the shop on her right; the island ahead.
   layoutStation() {
-    const face = (o, x, y, z) => { o.position.set(x, y, z); o.lookAt(0, y, PLAYER_Z + 0.3); };
+    const face = (o, x, y, z) => { o.position.set(x, y, z); o.lookAt(0, y, this.playerZ + 0.3); };
     const y = this.panelH;
+    if (this.seated) {
+      // round her chair: quest board front-left, shop front-right; the scroll lies tilted like paper at the
+      // table's edge in front of her, the gem tray hovers just beyond it over the island's near edge
+      const arc = (o, deg, r, yy) => { const a = (deg * Math.PI) / 180; o.position.set(Math.sin(a) * r, yy, this.playerZ - Math.cos(a) * r); o.lookAt(0, yy, this.playerZ); };
+      arc(this.board.mesh, -55, 0.33, y);
+      arc(this.shop.group, 42, 0.33, y - 0.02); this.shop.group.scale.setScalar(SEAT_SHOP);
+      arc(this.scroll.group, 0, 0.25, TOPY + 0.1); this.scroll.group.rotateX(-1.0);
+      arc(this.tray.group, 0, 0.48, TOPY + 0.12); this.tray.group.rotateX(-0.5); // low enough that she sees the island over it
+      return;
+    }
     face(this.board.mesh, -0.62, y + 0.05, PLAYER_Z - 0.42);
     face(this.scroll.group, -1.3, y, PLAYER_Z - 0.9);
     face(this.tray.group, -0.3, y - 0.34, PLAYER_Z - 0.3); this.tray.group.rotateX(-0.5);
@@ -609,7 +624,7 @@ export class Kingdom extends Game {
   makeWelcomeSign(save) {
     const text = save.built?.length ? `Welcome back to your kingdom, ${this.opts.name || 'Explorer'}!` : 'Solve quests to earn gems. Spend them in the shop and build your kingdom!';
     const s = makeSign(text, { w: 1.3, h: 0.3, size: 70, bg: '#2b1a4a', fg: '#ffe9a8' });
-    s.position.set(0, 1.6, -0.95); s.lookAt(0, 1.6, PLAYER_Z); this.world.add(s); this.welcome = s;
+    s.position.set(0, 1.6, -0.95); s.lookAt(0, 1.6, this.playerZ); this.world.add(s); this.welcome = s;
   }
 
   // ------------------------------------------------------------ holding and placing
@@ -771,9 +786,9 @@ export class Kingdom extends Game {
     const fwd = new THREE.Vector3(); this.camera.getWorldDirection(fwd); fwd.y = 0;
     if (fwd.lengthSq() < 1e-4) return;
     fwd.normalize();
-    // she stands at PLAYER_Z in kingdom coordinates, facing the island
+    // she stands (or sits) at playerZ in kingdom coordinates, facing the island
     this.world.rotation.y = Math.atan2(-fwd.x, -fwd.z);
-    this.world.position.set(head.x + fwd.x * PLAYER_Z, 0, head.z + fwd.z * PLAYER_Z);
+    this.world.position.set(head.x + fwd.x * this.playerZ, this.liftY, head.z + fwd.z * this.playerZ);
     this.placePending = false;
     this.audio.cueArrive?.('castle');
   }
@@ -796,7 +811,7 @@ export class Kingdom extends Game {
     }
     // quest board, scroll, tray and shop follow her eye height (taller grown-ups, shorter girls)
     const eye = this.world.worldToLocal(head.clone()).y;
-    const want = clamp(eye - 0.35, 0.75, 1.3);
+    const want = this.seated ? clamp(eye - 0.3, 0.6, 1.3) : clamp(eye - 0.35, 0.75, 1.3);
     if (Math.abs(want - this.panelH) > 0.005) { this.panelH += (want - this.panelH) * Math.min(1, dt * 2); this.layoutStation(); }
     for (const p of this.panels) p.update();
     for (const a of this.anims) { a.t += dt; if (a.t >= 0) a.fn(Math.min(1, a.t / a.dur)); }
