@@ -483,7 +483,7 @@ export class Kingdom extends Game {
     // "Move kingdom here" (headset only): the island jumps to in front of her
     const move = makeSign('Move my kingdom here', { w: 0.42, h: 0.08, size: 60, bg: '#2b1a4a', fg: '#ffe9a8' });
     move.position.set(0, -H / 2 - 0.07, 0); shop.group.add(move);
-    move.userData.button = { action: () => { this.placePending = true; this.audio.click(); } };
+    move.userData.button = { action: () => { this.placePending = true; } };
     const shrink = makeSign('Shrink down and visit!', { w: 0.42, h: 0.08, size: 60, bg: '#1f6b3a', fg: '#ffffff' });
     shrink.position.set(0, -H / 2 - 0.17, 0); shop.group.add(shrink);
     shrink.userData.button = { action: () => this.shrinkDown() };
@@ -636,19 +636,22 @@ export class Kingdom extends Game {
   }
 
   // ------------------------------------------------------------ pointing
+  // pokeable / pinchable sign buttons ("Move my kingdom here" only in the headset)
+  buttonMeshes() {
+    return [...super.buttonMeshes(), this.shrinkBtn, this.renderer.xr.isPresenting ? this.moveBtn : null, this.growBtn];
+  }
   castFrom(origin, dir) {
     this.raycaster.set(origin, dir);
     const t = [];
     if (this.visiting) { // small and walking about: the only thing to press is "grow big again"
-      const h = this.raycaster.intersectObject(this.growBtn, false)[0];
-      return h ? { type: 'button', button: this.growBtn.userData.button, point: h.point, distance: h.distance } : null;
+      const h = this.raycaster.intersectObjects(this.uiButtons(), false)[0];
+      return h ? { type: 'button', button: h.object.userData.button, mesh: h.object, point: h.point, distance: h.distance } : null;
     }
-    t.push(this.shrinkBtn);
+    t.push(...this.uiButtons());
     for (const p of this.panels) if (p.mesh.visible) t.push(p.mesh);
     if (this.tray) t.push(...this.tray.pickables());
     if (this.scroll) t.push(this.scroll.mesh);
     for (const s of this.shop.slots) t.push(s.hit);
-    if (this.renderer.xr.isPresenting) t.push(this.moveBtn);
     for (const b of this.buildings) t.push(b.hit);
     t.push(this.islandTop);
     const hit = this.raycaster.intersectObjects(t, false)[0];
@@ -658,7 +661,7 @@ export class Kingdom extends Game {
     if (o.userData.scroll) return { ...base, type: 'scroll' };
     if (o.userData.traySlot !== undefined) return { ...base, type: 'tray', slot: o.userData.traySlot };
     if (o.userData.shopItem) return { ...base, type: 'shop', item: o.userData.shopItem };
-    if (o.userData.button) return { ...base, type: 'button', button: o.userData.button };
+    if (o.userData.button) return { ...base, type: 'button', button: o.userData.button, mesh: o };
     if (o.userData.building) return { ...base, type: 'building', b: o.userData.building };
     return { ...base, type: 'island' };
   }
@@ -668,7 +671,7 @@ export class Kingdom extends Game {
     if (!h || ptr.holding) return;
     if (h.type === 'shop') return this.pickFromShop(ptr, h.item, true);
     if (h.type === 'building') return this.pickBuilding(ptr, h.b, true);
-    if (h.type === 'button') return h.button.action();
+    if (h.type === 'button') return this.pressButton(h.mesh, ptr);
     if (h.type !== 'island') super.select(ptr);
   }
   desktopClick() {
@@ -677,7 +680,7 @@ export class Kingdom extends Game {
     const h = ptr.hit;
     if (h?.type === 'shop') return this.pickFromShop(ptr, h.item);
     if (h?.type === 'building') return this.pickBuilding(ptr, h.b);
-    if (h?.type === 'button') return h.button.action();
+    if (h?.type === 'button') return this.pressButton(h.mesh, ptr);
     this.select(ptr);
   }
   showBanner(text) {
@@ -738,7 +741,7 @@ export class Kingdom extends Game {
     for (const a of this.anims) { a.t += dt; if (a.t >= 0) a.fn(Math.min(1, a.t / a.dur)); }
     for (const a of this.anims.filter((a) => a.t >= a.dur)) a.done?.();
     this.anims = this.anims.filter((a) => a.t < a.dur);
-    this.updateParticles(dt);
+    this.updateParticles(dt); this.pressFx.update(dt);
     this.updatePointers(dt, []);
     // ghost ring under a held building
     this.ghost.visible = false;

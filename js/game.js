@@ -13,6 +13,7 @@ import { Props } from './props.js';
 import { GemTray } from './tray.js';
 import { MagicScroll } from './scroll.js';
 import { loadAssets, ART_FLOORS } from './assets.js';
+import { PressFx, shown, pokeThrough } from './hands.js';
 
 // ------------------------------------------------------------ layout
 const FH = 3.6, SLAB = 0.4, CEIL = FH - SLAB, WALL_T = 0.3, HATCH = 1.2;
@@ -301,9 +302,11 @@ class Panel {
     for (const b of this.buttons) {
       const hover = b.id === this.hoverId;
       const col = { ok: ['#23a55a', '#3fd57f'], digit: ['#3d2f6b', '#6a54b8'], tool: ['#6b3d2f', '#a9644d'], choice: ['#3d2f6b', '#6a54b8'] }[b.kind];
-      ctx.fillStyle = hover ? col[1] : col[0]; roundRect(ctx, b.x, b.y, b.w, b.h, 22); ctx.fill();
-      ctx.lineWidth = hover ? 8 : 4; ctx.strokeStyle = hover ? '#ffe9a8' : 'rgba(255,233,168,0.5)'; ctx.stroke();
-      ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
+      // a pressed key sinks and lights up for a moment (hands have no buzz to feel)
+      const down = b.id === this.flashId, ins = down ? 8 : 0;
+      ctx.fillStyle = down ? '#ffe9a8' : hover ? col[1] : col[0]; roundRect(ctx, b.x + ins, b.y + ins, b.w - 2 * ins, b.h - 2 * ins, 22); ctx.fill();
+      ctx.lineWidth = hover || down ? 8 : 4; ctx.strokeStyle = down ? '#fff' : hover ? '#ffe9a8' : 'rgba(255,233,168,0.5)'; ctx.stroke();
+      ctx.fillStyle = down ? '#2b1a4a' : '#fff'; ctx.textAlign = 'center';
       ctx.font = `bold ${b.big ? 150 : b.kind === 'tool' && b.y < 100 ? 42 : 64}px ${FONT}`;
       ctx.fillText(b.label, b.x + b.w / 2, b.y + b.h / 2 + 4);
     }
@@ -314,7 +317,8 @@ class Panel {
     return this.buttons.find((b) => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h)?.id ?? null;
   }
   hover(uv) { const id = uv ? this.buttonAt(uv) : null; if (id !== this.hoverId) { this.hoverId = id; this.draw(); } }
-  press(uv) { const id = this.buttonAt(uv); if (id) this.pressKey(id); }
+  press(uv) { const id = this.buttonAt(uv); if (id) { this.pressKey(id); this.flash(id); } }
+  flash(id) { if (!this.buttons?.some((b) => b.id === id)) return; this.flashId = id; this.flashUntil = performance.now() + 160; this.draw(); }
   pressKey(k) {
     const now = performance.now();
     if (this.state !== 'solving' || !this.problem) return;
@@ -363,6 +367,7 @@ class Panel {
     this.draw();
   }
   update() {
+    if (this.flashId && performance.now() >= this.flashUntil) { this.flashId = null; this.draw(); }
     if (this.after && performance.now() >= this.busyUntil) { const f = this.after; this.after = null; f(); }
   }
 }
@@ -416,7 +421,7 @@ export class Game {
     this.audio = this.sfx = new AudioEngine({ musicVolume: opts.music ?? 0.5 });
     duckMusic = (s) => this.audio.duck(s);
     this.clock = new THREE.Clock();
-    this.anims = []; this.particles = []; this.extraTips = [];
+    this.anims = []; this.particles = []; this.extraTips = []; this.pressFx = new PressFx();
     this.initRenderer();
     this.assets = null;
     this.assetsReady = opts.mode === 'kingdom' ? Promise.resolve(null) : loadAssets().then((a) => (this.assets = a)); // the kingdom has its own kit
@@ -1825,6 +1830,7 @@ export class Game {
     for (const ch of this.chests) if (!ch.opened && !ch.big) ch.group.traverse((o) => { if (o.isMesh && o.userData.chest) targets.push(o); });
     if (this.tray) targets.push(...this.tray.pickables());
     if (this.scroll?.active()) targets.push(this.scroll.mesh);
+    targets.push(...this.uiButtons());
     if (this.props) {
       for (const b of this.props.bodies) if (!b.held && !b.worn) b.mesh.traverse((o) => { if (o.isMesh) targets.push(o); });
       for (const c of [this.props.cat?.group, this.props.owl?.group]) c?.traverse((o) => { if (o.isMesh) { o.userData.touchable = true; targets.push(o); } });
@@ -1833,6 +1839,7 @@ export class Game {
     if (!hit) return null;
     const o = hit.object;
     if (o.userData.panel) return { type: 'panel', panel: o.userData.panel, uv: hit.uv, point: hit.point, distance: hit.distance };
+    if (o.userData.button) return { type: 'button', button: o.userData.button, mesh: o, point: hit.point, distance: hit.distance };
     if (o.userData.chest) return { type: 'chest', chest: o.userData.chest, point: hit.point, distance: hit.distance };
     if (o.userData.scroll) return { type: 'scroll', uv: hit.uv, point: hit.point, distance: hit.distance };
     if (o.userData.traySlot !== undefined) return { type: 'tray', slot: o.userData.traySlot, point: hit.point, distance: hit.distance };
@@ -1850,6 +1857,17 @@ export class Game {
     else if (h.type === 'tray') this.tray.clickSlot(h.slot);
     else if (h.type === 'scroll') { ptr.rayDrawing = true; this.scroll.rayDraw(ptr, h.uv); }
     else if (h.type === 'touch') this.extraTips.push({ pos: h.point.clone(), vel: new THREE.Vector3(0, 0, -1) });
+    else if (h.type === 'button') this.pressButton(h.mesh, ptr);
+  }
+
+  // Flat sign buttons (mesh.userData.button = { action, hand? }) that a finger can poke or a ray can press.
+  // `hand` names the hand that carries the button (its own fingers can't press it).
+  buttonMeshes() { return []; }
+  uiButtons() { return this.buttonMeshes().filter((b) => b && b.userData.button && shown(b)); }
+  pressButton(mesh, ptr = null) {
+    const b = mesh?.userData.button; if (!b) return;
+    this.audio.resume(); this.audio.click(); this.pressFx.press(mesh); if (ptr) this.haptic(ptr);
+    b.action(ptr);
   }
 
   // Finger / wand-tip touch: press a panel button when the tip pushes through
@@ -1868,8 +1886,13 @@ export class Game {
       if (l.z < 0.1 && l.z > -0.08) hover = { panel: p, uv };
       if (prev > 0.005 && l.z <= 0.005 && l.z > -0.08 && ptr.cool === 0) {
         const id = p.buttonAt(uv);
-        if (id) { p.pressKey(id); ptr.cool = 0.3; this.haptic(ptr); }
+        if (id) { p.pressKey(id); p.flash(id); ptr.cool = 0.3; this.haptic(ptr); }
       }
+    }
+    for (const b of this.uiButtons()) {
+      if (b.userData.button.hand && b.userData.button.hand === ptr.src?.handedness) continue;
+      b.updateMatrixWorld(); // menus move every frame
+      if (pokeThrough(b, tip, ptr.poke) && ptr.cool === 0) { this.pressButton(b, ptr); ptr.cool = 0.3; }
     }
     for (const ch of this.chests) {
       if (ch.opened || ch.panel || ch.big) continue;
@@ -1979,7 +2002,7 @@ export class Game {
     for (const a of this.anims) { a.t += dt; if (a.t >= 0) a.fn(Math.min(1, a.t / a.dur)); }
     for (const a of this.anims.filter((a) => a.t >= a.dur)) a.done?.();
     this.anims = this.anims.filter((a) => a.t < a.dur);
-    this.updateParticles(dt);
+    this.updateParticles(dt); this.pressFx.update(dt);
     // ambience: torches, crystals, windmill, clouds, flags, balloon, dust
     for (const tc of this.torches) { const f = 0.85 + 0.15 * Math.sin(t * 13 + tc.ph) * Math.sin(t * 7.3 + tc.ph); tc.sprite.scale.set(0.14 * f, 0.26 * (0.9 + 0.2 * f), 1); }
     this.lights.forEach((l, i) => { if (l.intensity > 0) l.intensity = 4 * (0.92 + 0.08 * Math.sin(t * 9 + i * 2)); });
