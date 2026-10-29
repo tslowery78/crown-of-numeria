@@ -13,7 +13,7 @@ import { Props } from './props.js';
 import { GemTray } from './tray.js';
 import { MagicScroll } from './scroll.js';
 import { loadAssets, ART_FLOORS } from './assets.js';
-import { PressFx, shown, pokeThrough, makeFillRing } from './hands.js';
+import { PressFx, shown, pokeThrough, makeFillRing, HandMenu } from './hands.js';
 
 // ------------------------------------------------------------ layout
 const FH = 3.6, SLAB = 0.4, CEIL = FH - SLAB, WALL_T = 0.3, HATCH = 1.2;
@@ -1675,7 +1675,6 @@ export class Game {
     this.hudTex = new THREE.CanvasTexture(this.hudCanvas); this.hudTex.colorSpace = THREE.SRGBColorSpace;
     this.hudMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.12, 0.06), new THREE.MeshBasicMaterial({ map: this.hudTex, transparent: true, depthTest: false, toneMapped: false }));
     this.hudMesh.renderOrder = 10;
-    this.hudMesh.position.set(0, 0.05, 0.02); this.hudMesh.rotation.x = -0.6;
   }
   updateHud() {
     if (!this.stats) return;
@@ -1695,6 +1694,7 @@ export class Game {
     this.raycaster = new THREE.Raycaster(); this.raycaster.far = 6;
     this.pointers = [];
     this.makeHudTexture();
+    this.handMenu = new HandMenu(this, this.hudMesh);
     const wandMat = new THREE.MeshStandardMaterial({ color: 0x5a3a8a, roughness: 0.5 }), starMat = new THREE.MeshBasicMaterial({ color: 0xffe066, toneMapped: false });
     const jointGeo = new THREE.SphereGeometry(1, 8, 6), tipMat = new THREE.MeshBasicMaterial({ color: 0xffe066, toneMapped: false });
     for (let i = 0; i < 2; i++) {
@@ -1710,10 +1710,9 @@ export class Game {
       const pinch = new THREE.Object3D(); this.scene.add(pinch);
       const ptr = { c, grip, ray, wand, star, dot, pinch, src: null, hit: null, poke: new Map(), cool: 0, holding: null, lastTip: null };
       c.addEventListener('connected', (e) => {
-        ptr.src = e.data; wand.visible = !e.data.hand;
-        if (e.data.handedness === 'left' && !e.data.hand) c.add(this.hudMesh);
+        ptr.src = e.data; wand.visible = !e.data.hand; // the gem counter finds its hand / controller in handMenu.update()
       });
-      c.addEventListener('disconnected', () => { ptr.src = null; dot.visible = false; if (ptr.holding) this.drop(ptr); });
+      c.addEventListener('disconnected', () => { ptr.src = null; dot.visible = false; if (ptr.holding) this.drop(ptr); if (this.handMenu.group.parent === c) this.handMenu.detach(); });
       c.addEventListener('selectstart', () => {
         if (this.roomMeasure || this.centerPrompt) {
           // hands: pinch and hold while the ring fills; controller trigger: instant
@@ -2051,6 +2050,7 @@ export class Game {
     this.avatarRig.update(head, headQ, this.rig.position.y, hands, dt, t);
     // props, touches, audio listener
     const tips = this.extraTips.splice(0);
+    this.handMenu.update(dt);
     this.updatePointers(dt, tips);
     this.props.update(dt, t, head, tips);
     if (this.tray) { this.tray.place(this.level, fy(this.level), this.W, this.D, this.panelH); this.tray.updateHeld(); }

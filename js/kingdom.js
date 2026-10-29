@@ -742,6 +742,7 @@ export class Kingdom extends Game {
     for (const a of this.anims.filter((a) => a.t >= a.dur)) a.done?.();
     this.anims = this.anims.filter((a) => a.t < a.dur);
     this.updateParticles(dt); this.pressFx.update(dt);
+    this.handMenu.update(dt);
     this.updatePointers(dt, []);
     // ghost ring under a held building
     this.ghost.visible = false;

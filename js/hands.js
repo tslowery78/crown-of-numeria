@@ -76,3 +76,41 @@ export function pokeThrough(mesh, tip, memo, margin = 0.012) {
   const inside = Math.abs(l.x) < p.width / 2 + mx && Math.abs(l.y) < p.height / 2 + my;
   return inside && prevs > 0.004 && zs <= 0.004 && zs > -0.07;
 }
+
+// The wrist panel: the gem / floor counter (and, later, a small menu) on the left hand.
+// Hands: it follows the left wrist and shows while the palm faces the head.
+// Controllers: it rides on the left controller as before.
+// Re-parented every frame from whichever left input is connected, so a controller <-> hand
+// switch (which can swap input slots) never leaves it stranded on the wrong one.
+export class HandMenu {
+  constructor(game, hud) {
+    this.g = game; this.hud = hud;
+    this.group = new THREE.Group(); this.group.visible = false; this.group.add(hud);
+    hud.position.set(0, 0, 0); hud.rotation.set(0, 0, 0);
+    this.grace = 0; this.mode = null; this.facing = -1;
+  }
+  leftPointer() { return this.g.pointers.find((p) => p.src && p.src.handedness === 'left') || null; }
+  detach() { this.group.removeFromParent(); this.group.visible = false; this.mode = null; }
+  update(dt) {
+    const g = this.g, left = g.renderer.xr.isPresenting ? this.leftPointer() : null;
+    if (!left) return this.detach();
+    if (!left.src.hand) {
+      if (this.group.parent !== left.c) { left.c.add(this.group); this.group.position.set(0, 0.05, 0.02); this.group.rotation.set(-0.6, 0, 0); }
+      this.mode = 'controller'; this.group.visible = true; this.palm = null;
+      return;
+    }
+    if (this.group.parent !== g.scene) { g.scene.add(this.group); this.group.rotation.set(0, 0, 0); }
+    this.mode = 'hand';
+    const pose = this.palm = palmPose(left.hand, 'left'), head = g.headPos();
+    const f = this.facing = palmFacing(pose, head), near = !!pose && pose.center.distanceTo(head) < 0.8;
+    // hysteresis: show when the palm clearly faces her, keep showing while it roughly does
+    if (near && (f > 0.55 || (f > 0.25 && this.grace > 0))) this.grace = 0.35; else this.grace -= dt;
+    this.group.visible = this.grace > 0 && !!pose;
+    if (pose) {
+      // just beside the palm on the little-finger side (towards her other hand), facing her eyes
+      this.group.position.copy(pose.center).addScaledVector(pose.normal, 0.045).addScaledVector(pose.across, -0.085).addScaledVector(pose.along, -0.02);
+      this.group.lookAt(head);
+    }
+    this.group.updateMatrixWorld(true);
+  }
+}
