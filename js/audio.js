@@ -55,7 +55,9 @@ export class AudioEngine {
     for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
     return buf;
   }
-  resume() { if (this.ctx && this.ctx.state !== 'running') this.ctx.resume(); }
+  resume() { if (this.ctx && !this.paused && this.ctx.state !== 'running') this.ctx.resume(); }
+  // Pause freezes every sound, music included; resume picks up where it stopped.
+  setPaused(on) { this.paused = !!on; if (!this.ctx) return; if (on) this.ctx.suspend?.(); else this.ctx.resume(); }
   get now() { return this.ctx ? this.ctx.currentTime : 0; }
 
   // Listener follows the player's head.

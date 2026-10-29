@@ -135,7 +135,8 @@ export class Kingdom extends Game {
       const ref = this.renderer.xr.getReferenceSpace();
       const reset = () => { this.placePending = true; };
       ref.addEventListener('reset', reset); // recentering puts the kingdom in front of her again
-      session.addEventListener('end', () => { ref.removeEventListener('reset', reset); this.camera.position.set(0, 1.3, 0); this.onExitVR?.(); });
+      session.addEventListener('visibilitychange', () => { if (session.visibilityState !== 'visible') this.setPaused(true); });
+      session.addEventListener('end', () => { this.setPaused(false); ref.removeEventListener('reset', reset); this.camera.position.set(0, 1.3, 0); this.onExitVR?.(); });
       this.startAudio();
     } catch (e) { await session.end().catch(() => {}); throw e; }
   }
@@ -635,6 +636,9 @@ export class Kingdom extends Game {
     this.audio.roar(this.island.getWorldPosition(new THREE.Vector3()));
   }
 
+  // the menu's Recenter puts the kingdom in front of her again (the same as "Move my kingdom here")
+  recenter() { if (this.renderer.xr.isPresenting) { this.placePending = true; this.showBanner('Recentered!'); } }
+
   // ------------------------------------------------------------ pointing
   // pokeable / pinchable sign buttons ("Move my kingdom here" only in the headset)
   buttonMeshes() {
@@ -724,6 +728,7 @@ export class Kingdom extends Game {
     if (xr) { this.rig.updateMatrixWorld(true); this.renderer.xr.updateCamera(this.camera); }
     let head = this.headPos();
     if (xr && this.placePending && head.y > 0.5) { if (this.visiting) this.growBack(); this.anchorInFront(head); }
+    if (this.paused) { this.pausedFrame(dt); return; }
     if (!xr) {
       const f = (this.keys.has('w') || this.keys.has('arrowup') ? 1 : 0) - (this.keys.has('s') || this.keys.has('arrowdown') ? 1 : 0);
       const s = (this.keys.has('d') ? 1 : 0) - (this.keys.has('a') ? 1 : 0);

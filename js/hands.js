@@ -87,8 +87,20 @@ export class HandMenu {
     this.g = game; this.hud = hud;
     this.group = new THREE.Group(); this.group.visible = false; this.group.add(hud);
     hud.position.set(0, 0, 0); hud.rotation.set(0, 0, 0);
-    this.grace = 0; this.mode = null; this.facing = -1;
+    this.grace = 0; this.mode = null; this.facing = -1; this.open = false; this.xWas = false;
+    // the menu: Pause / Resume, Recenter, Leave VR, stacked above the counter. Pressed by the
+    // other hand's finger (or a ray + pinch / trigger); `hand: 'left'` stops the left hand pressing its own menu.
+    this.buttons = new THREE.Group(); this.group.add(this.buttons); this.byId = {};
+    const rows = [[['pause', 'Pause', () => game.setPaused(true)], ['resume', 'Resume', () => game.setPaused(false)]], [['recenter', 'Recenter', () => game.recenter()]], [['leave', 'Leave VR', () => game.leaveVR(), '#6b2a2a']]];
+    rows.forEach((row, k) => row.forEach(([id, label, action, bg]) => {
+      const m = game.makeSign(label, { w: 0.13, h: 0.045, size: 64, bg: bg || '#2b1a4a', fg: '#ffe9a8', px: 512 });
+      m.position.set(0, 0.06 + k * 0.052, 0); m.userData.button = { action, hand: 'left', id };
+      this.buttons.add(m); this.byId[id] = m;
+    }));
+    this.buttonList = Object.values(this.byId);
+    this.setPaused(false);
   }
+  setPaused(on) { this.byId.pause.visible = !on; this.byId.resume.visible = !!on; }
   leftPointer() { return this.g.pointers.find((p) => p.src && p.src.handedness === 'left') || null; }
   detach() { this.group.removeFromParent(); this.group.visible = false; this.mode = null; }
   update(dt) {
@@ -97,10 +109,16 @@ export class HandMenu {
     if (!left.src.hand) {
       if (this.group.parent !== left.c) { left.c.add(this.group); this.group.position.set(0, 0.05, 0.02); this.group.rotation.set(-0.6, 0, 0); }
       this.mode = 'controller'; this.group.visible = true; this.palm = null;
+      // X button opens / closes the menu above the counter
+      const x = !!left.src.gamepad?.buttons?.[4]?.pressed;
+      if (x && !this.xWas) { this.open = !this.open; g.audio?.click(); }
+      this.xWas = x;
+      this.buttons.visible = this.open || !!g.paused;
+      this.group.updateMatrixWorld(true);
       return;
     }
     if (this.group.parent !== g.scene) { g.scene.add(this.group); this.group.rotation.set(0, 0, 0); }
-    this.mode = 'hand';
+    this.mode = 'hand'; this.buttons.visible = true;
     const pose = this.palm = palmPose(left.hand, 'left'), head = g.headPos();
     const f = this.facing = palmFacing(pose, head), near = !!pose && pose.center.distanceTo(head) < 0.8;
     // hysteresis: show when the palm clearly faces her, keep showing while it roughly does

@@ -496,7 +496,10 @@ export class Game {
         else this.askForCenter();
       };
       reference.addEventListener('reset', reset);
+      // the Meta menu (or taking the headset off) hides the game: pause until she presses Resume
+      session.addEventListener('visibilitychange', () => { if (session.visibilityState !== 'visible') this.setPaused(true); });
       session.addEventListener('end', () => {
+        this.setPaused(false);
         reference.removeEventListener('reset', reset);
         this.xrCalibrating = false; this.xrBoundsSpace = null;
         this.camera.position.set(0, 1.3, 0); this.rig.position.x = this.rig.position.z = 0; this.rig.rotation.set(0, 0, 0);
@@ -1714,6 +1717,7 @@ export class Game {
       });
       c.addEventListener('disconnected', () => { ptr.src = null; dot.visible = false; if (ptr.holding) this.drop(ptr); if (this.handMenu.group.parent === c) this.handMenu.detach(); });
       c.addEventListener('selectstart', () => {
+        if (this.paused) return this.select(ptr); // only the Resume / menu buttons answer while paused
         if (this.roomMeasure || this.centerPrompt) {
           // hands: pinch and hold while the ring fills; controller trigger: instant
           if (ptr.src?.hand) { ptr.pinchHold = { t: 0, kind: this.roomMeasure ? 'corner' : 'center' }; return; }
@@ -1723,7 +1727,7 @@ export class Game {
       });
       c.addEventListener('selectend', () => {
         this.selectEnd(ptr); if (ptr.rayDrawing) { ptr.rayDrawing = false; this.scroll?.lift(ptr); } if ((ptr.holding || ptr.holdingTray) && ptr.grabBy === 'select') this.drop(ptr); });
-      c.addEventListener('squeezestart', () => { if (this.tryGrab(ptr)) ptr.grabBy = 'squeeze'; });
+      c.addEventListener('squeezestart', () => { if (!this.paused && this.tryGrab(ptr)) ptr.grabBy = 'squeeze'; });
       c.addEventListener('squeezeend', () => { if ((ptr.holding || ptr.holdingTray) && ptr.grabBy === 'squeeze') this.drop(ptr); });
       this.rig.add(c); this.rig.add(grip);
       const hand = this.renderer.xr.getHand(i);
@@ -1762,6 +1766,8 @@ export class Game {
         if (p) { p.pressKey(k === 'Backspace' ? '⌫' : k === 'Enter' ? 'OK' : k); e.preventDefault(); }
         return;
       }
+      if (k === 'p' || k === 'P') this.setPaused(!this.paused);
+      if (this.paused) return;
       if (k === 'h' || k === 'H') this.activePanel()?.pressKey('hint');
       if (k === 'r' || k === 'R') this.activePanel()?.pressKey('read');
       this.keys.add(k.toLowerCase());
@@ -1886,8 +1892,74 @@ export class Game {
 
   // Flat sign buttons (mesh.userData.button = { action, hand? }) that a finger can poke or a ray can press.
   // `hand` names the hand that carries the button (its own fingers can't press it).
-  buttonMeshes() { return []; }
-  uiButtons() { return this.buttonMeshes().filter((b) => b && b.userData.button && shown(b)); }
+  buttonMeshes() { return [...this.handMenu.buttonList, this.pauseUi?.userData.resume]; }
+  uiButtons() { return (this.paused ? Game.prototype.buttonMeshes.call(this) : this.buttonMeshes()).filter((b) => b && b.userData.button && shown(b)); }
+
+  // ---------------------------------------------------------- pause / recenter / leave
+  // Pause freezes the frame loop's updates (animations, physics, the lift, villagers), every sound and
+  // the panels' timers; only the menu and a Resume button in front of her still answer.
+  setPaused(on) {
+    if (!!on === !!this.paused) return;
+    if (on) {
+      this.paused = { at: performance.now() };
+      clearTimeout(this.readTimer); if ('speechSynthesis' in window) speechSynthesis.cancel();
+    } else {
+      const d = performance.now() - this.paused.at;
+      for (const p of this.panels || []) { if (p.busyUntil) p.busyUntil += d; if (p.shownAt) p.shownAt += d; }
+      this.paused = null; this.clock.getDelta();
+    }
+    this.audio.setPaused(on);
+    this.handMenu.setPaused(on);
+    this.updatePauseUi();
+  }
+  updatePauseUi() {
+    if (!this.pauseUi) {
+      const ui = this.pauseUi = new THREE.Group();
+      const title = makeSign('Paused', { w: 0.34, h: 0.09, size: 90, bg: '#2b1a4a', fg: '#ffd54a' }); title.position.y = 0.06; ui.add(title);
+      const resume = makeSign('Resume', { w: 0.24, h: 0.08, size: 80, bg: '#1f6b3a', fg: '#ffffff' }); resume.position.y = -0.05;
+      resume.userData.button = { action: () => this.setPaused(false), id: 'resume' };
+      ui.add(resume); ui.userData.resume = resume; this.scene.add(ui);
+    }
+    const ui = this.pauseUi; ui.visible = !!this.paused;
+    if (!ui.visible) { ui.userData.placed = false; return; }
+    // half a metre ahead, a little below her eyes, re-placed only if she turns well away
+    const head = this.headPos(), fwd = new THREE.Vector3(); this.camera.getWorldDirection(fwd); fwd.y = 0;
+    if (fwd.lengthSq() < 1e-4) fwd.set(0, 0, -1); fwd.normalize();
+    const want = head.clone().addScaledVector(fwd, 0.45); want.y = head.y - 0.18;
+    if (!ui.userData.placed || ui.position.distanceTo(want) > 0.4) { ui.position.copy(want); ui.userData.placed = true; }
+    ui.lookAt(head.x, ui.position.y, head.z); ui.updateMatrixWorld(true);
+  }
+  // While paused: keep the view, the safety edge warning, the menu and its buttons alive; nothing else moves.
+  pausedFrame(dt) {
+    this.handMenu.update(dt); this.updatePauseUi(); this.pressFx.update(dt);
+    const buttons = this.uiButtons(), m = new THREE.Matrix4(), o = new THREE.Vector3(), d = new THREE.Vector3();
+    if (this.renderer.xr.isPresenting) {
+      for (const ptr of this.pointers) {
+        if (!ptr.src) { ptr.ray.visible = ptr.dot.visible = false; continue; }
+        ptr.cool = Math.max(0, ptr.cool - dt);
+        const j = ptr.hand?.joints?.['index-finger-tip'], tip = ptr.src.hand ? j?.getWorldPosition(new THREE.Vector3()) : ptr.star.getWorldPosition(new THREE.Vector3());
+        if (tip) for (const b of buttons) { if (b.userData.button.hand && b.userData.button.hand === ptr.src.handedness) continue; if (pokeThrough(b, tip, ptr.poke) && ptr.cool === 0) { this.pressButton(b, ptr); ptr.cool = 0.3; } }
+        m.identity().extractRotation(ptr.c.matrixWorld); o.setFromMatrixPosition(ptr.c.matrixWorld); d.set(0, 0, -1).applyMatrix4(m);
+        this.raycaster.set(o, d);
+        const h = this.raycaster.intersectObjects(buttons, false)[0];
+        ptr.hit = h ? { type: 'button', button: h.object.userData.button, mesh: h.object, point: h.point, distance: h.distance } : null;
+        ptr.ray.visible = ptr.dot.visible = !!h; if (h) { ptr.ray.scale.z = h.distance; ptr.dot.position.copy(h.point); }
+      }
+    } else {
+      this.camera.getWorldPosition(o); this.camera.getWorldDirection(d); this.raycaster.set(o, d);
+      const h = this.raycaster.intersectObjects(buttons, false)[0];
+      this.desktopPtr.hit = h ? { type: 'button', button: h.object.userData.button, mesh: h.object, point: h.point, distance: h.distance } : null;
+    }
+    this.renderer.render(this.scene, this.camera);
+  }
+  // Recenter from the menu: seated and fixed-size play put the castle back around her; a measured or
+  // Guardian-fitted castle stays on the real floor (moving it would put walls in the wrong place).
+  recenter() {
+    if (!this.renderer.xr.isPresenting) return;
+    if (this.opts.seated || (this.fitInfo?.type === 'local-floor' && !this.roomMode)) { this.xrCalibrating = true; this.showBanner('Recentered!'); }
+    else this.showBanner('Your castle is fitted to your room. Hold the Meta button to recenter.');
+  }
+  leaveVR() { this.setPaused(false); this.renderer.xr.getSession()?.end().catch(() => {}); }
   pressButton(mesh, ptr = null) {
     const b = mesh?.userData.button; if (!b) return;
     this.audio.resume(); this.audio.click(); this.pressFx.press(mesh); if (ptr) this.haptic(ptr);
@@ -1999,6 +2071,7 @@ export class Game {
       if (!pose || !this.calibrateXR(pose)) return;
     }
     if (xr) { this.rig.updateMatrixWorld(true); this.renderer.xr.updateCamera(this.camera); }
+    if (this.paused) { this.updateEdgeWarning(0); this.pausedFrame(dt); return; }
     this.updateEdgeWarning(dt);
     this.updatePinchHolds(dt);
     if (this.centerPrompt && this.centerSign) {
