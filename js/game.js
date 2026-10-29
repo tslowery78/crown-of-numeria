@@ -553,6 +553,7 @@ export class Game {
   // Walk-the-corners room measuring. reanchor = keep the current room size and only re-mark
   // the front wall (after a recenter that gave no reset transform).
   beginMeasure(type, reanchor) {
+    this.setPaused(false); // a Meta-button recenter arrives while the Meta menu has paused her; measuring can't show Resume
     this.roomMeasure = { type, reanchor, points: [], msg: '' };
     this.rig.position.set(0, 0, 0); this.rig.rotation.set(0, 0, 0); this.rig.updateMatrixWorld(true);
     if (this.world) this.world.visible = false;
