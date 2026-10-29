@@ -178,7 +178,7 @@ const url=process.argv[2]||'http://127.0.0.1:8765/';
     along=along.clone().normalize();normal=normal.clone().normalize();
     const across=side==='left'?v().crossVectors(normal,along):v().crossVectors(along,normal);
     const at=(a,c)=>wrist.clone().addScaledVector(along,a).addScaledVector(across,c);
-    const pts={wrist,'middle-finger-metacarpal':at(.07,0),'index-finger-metacarpal':at(.065,.025),'pinky-finger-metacarpal':at(.06,-.03),'index-finger-tip':at(.17,.02),'thumb-tip':at(.1,.06)};
+    const pts={wrist,'middle-finger-metacarpal':at(.07,0),'index-finger-metacarpal':at(.065,.025),'pinky-finger-metacarpal':at(.06,-.03),'middle-finger-phalanx-proximal':at(.09,0),'index-finger-phalanx-proximal':at(.085,.025),'pinky-finger-phalanx-proximal':at(.075,-.03),'index-finger-tip':at(.17,.02),'thumb-tip':at(.1,.06)};
     if(!ptr.src||ptr.src.handedness!==side||!ptr.src.hand)ptr.c.dispatchEvent({type:'connected',data:{handedness:side,hand:new Map(),gamepad:null,profiles:[]}});
     g.scene.updateMatrixWorld(true);ptr.hand.joints??={};
     for(const [n,p] of Object.entries(pts)){let j=ptr.hand.joints[n];if(!j){j=new T.Group();j.jointRadius=.008;ptr.hand.add(j);ptr.hand.joints[n]=j;}j.visible=true;j.position.copy(ptr.hand.worldToLocal(p.clone()));}

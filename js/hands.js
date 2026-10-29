@@ -10,7 +10,9 @@ const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3
 // For a left hand along x across points out of the palm; for a right hand it points out of the back.
 export function palmPose(hand, handedness) {
   const j = hand?.joints;
-  const w = j?.wrist, m = j?.['middle-finger-metacarpal'], i = j?.['index-finger-metacarpal'], p = j?.['pinky-finger-metacarpal'];
+  // knuckles (proximal phalanx joints): the metacarpal joints sit bunched near the wrist on a real hand
+  const k = (f) => j?.[f + '-finger-phalanx-proximal'] || j?.[f + '-finger-metacarpal'];
+  const w = j?.wrist, m = k('middle'), i = k('index'), p = k('pinky');
   if (!w || !m || !i || !p || w.visible === false || m.visible === false) return null;
   w.getWorldPosition(_a); m.getWorldPosition(_b); i.getWorldPosition(_c); p.getWorldPosition(_d);
   const along = _b.clone().sub(_a), across = _c.clone().sub(_d);
