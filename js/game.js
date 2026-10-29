@@ -13,7 +13,7 @@ import { Props } from './props.js';
 import { GemTray } from './tray.js';
 import { MagicScroll } from './scroll.js';
 import { loadAssets, ART_FLOORS } from './assets.js';
-import { PressFx, shown, pokeThrough } from './hands.js';
+import { PressFx, shown, pokeThrough, makeFillRing } from './hands.js';
 
 // ------------------------------------------------------------ layout
 const FH = 3.6, SLAB = 0.4, CEIL = FH - SLAB, WALL_T = 0.3, HATCH = 1.2;
@@ -31,6 +31,7 @@ const fy = (i) => i * FH;
 // window centres along a wall of length `len` (metres from the wall's middle)
 export const windowSpots = (len) => (len >= 4.6 ? [-len / 4, len / 4] : [0]);
 const ROOM_MIN = 1.6, ROOM_MAX = 8, EDGE_MARGIN = 0.15;
+const PINCH_HOLD = 0.5; // seconds a hand must keep pinching to mark a corner (a stray pinch does nothing)
 const ROOM_KEY = 'mathcastle.room.v1'; // measured room, stored in the Guardian-anchored space
 const TREASURES = [
   ['Ruby', 0xe0115f], ['Sapphire', 0x2a6cff], ['Emerald', 0x1fc46b], ['Amethyst', 0x9b4dff], ['Golden Star', 0xffc629],
@@ -1713,8 +1714,16 @@ export class Game {
         if (e.data.handedness === 'left' && !e.data.hand) c.add(this.hudMesh);
       });
       c.addEventListener('disconnected', () => { ptr.src = null; dot.visible = false; if (ptr.holding) this.drop(ptr); });
-      c.addEventListener('selectstart', () => { if (this.roomMeasure) return this.markCorner(ptr); if (this.centerPrompt) return this.confirmCenter(); if (!this.tryGrab(ptr)) this.select(ptr); else ptr.grabBy = 'select'; });
-      c.addEventListener('selectend', () => { if (ptr.rayDrawing) { ptr.rayDrawing = false; this.scroll?.lift(ptr); } if ((ptr.holding || ptr.holdingTray) && ptr.grabBy === 'select') this.drop(ptr); });
+      c.addEventListener('selectstart', () => {
+        if (this.roomMeasure || this.centerPrompt) {
+          // hands: pinch and hold while the ring fills; controller trigger: instant
+          if (ptr.src?.hand) { ptr.pinchHold = { t: 0, kind: this.roomMeasure ? 'corner' : 'center' }; return; }
+          return this.roomMeasure ? this.markCorner(ptr) : this.confirmCenter();
+        }
+        if (!this.tryGrab(ptr)) this.select(ptr); else ptr.grabBy = 'select';
+      });
+      c.addEventListener('selectend', () => {
+        this.selectEnd(ptr); if (ptr.rayDrawing) { ptr.rayDrawing = false; this.scroll?.lift(ptr); } if ((ptr.holding || ptr.holdingTray) && ptr.grabBy === 'select') this.drop(ptr); });
       c.addEventListener('squeezestart', () => { if (this.tryGrab(ptr)) ptr.grabBy = 'squeeze'; });
       c.addEventListener('squeezeend', () => { if ((ptr.holding || ptr.holdingTray) && ptr.grabBy === 'squeeze') this.drop(ptr); });
       this.rig.add(c); this.rig.add(grip);
@@ -1759,6 +1768,22 @@ export class Game {
       this.keys.add(k.toLowerCase());
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.key.toLowerCase()));
+  }
+
+  selectEnd(ptr) { ptr.pinchHold = null; }
+  // A hand pinch held for PINCH_HOLD seconds marks a room corner or confirms the centre; a ring fills meanwhile.
+  updatePinchHolds(dt) {
+    if (!this.holdRing) { this.holdRing = makeFillRing(0.035); this.scene.add(this.holdRing); }
+    let show = null;
+    for (const ptr of this.pointers) {
+      const h = ptr.pinchHold; if (!h) continue;
+      if (!ptr.src || (h.kind === 'corner' && !this.roomMeasure) || (h.kind === 'center' && !this.centerPrompt)) { ptr.pinchHold = null; continue; }
+      h.t += dt;
+      if (h.t >= PINCH_HOLD) { ptr.pinchHold = null; if (h.kind === 'corner') this.markCorner(ptr); else this.confirmCenter(); continue; }
+      show = ptr;
+    }
+    this.holdRing.visible = !!show;
+    if (show) { this.holdRing.position.copy(this.holdPoint(show)); this.holdRing.lookAt(this.headPos()); this.holdRing.setProgress(show.pinchHold.t / PINCH_HOLD); }
   }
 
   // Where a hand/controller grabs from (world space) and the object that holds things.
@@ -1966,7 +1991,7 @@ export class Game {
   // ---------------------------------------------------------- frame loop
   frame(xrFrame) {
     const dt = Math.min(this.clock.getDelta(), 0.05), t = this.clock.elapsedTime;
-    if (this.roomMeasure) { if (this.renderer.xr.isPresenting) this.renderer.xr.updateCamera(this.camera); this.updateMeasure(); this.renderer.render(this.scene, this.camera); return; }
+    if (this.roomMeasure) { if (this.renderer.xr.isPresenting) this.renderer.xr.updateCamera(this.camera); this.updateMeasure(); this.updatePinchHolds(dt); this.renderer.render(this.scene, this.camera); return; }
     if (!this.world) { this.renderer.render(this.scene, this.camera); return; }
     const xr = this.renderer.xr.isPresenting;
     if (xr && this.xrReset) return;
@@ -1976,6 +2001,7 @@ export class Game {
     }
     if (xr) { this.rig.updateMatrixWorld(true); this.renderer.xr.updateCamera(this.camera); }
     this.updateEdgeWarning(dt);
+    this.updatePinchHolds(dt);
     if (this.centerPrompt && this.centerSign) {
       const hp = this.headPos(), fwd = new THREE.Vector3(); this.camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
       this.centerSign.position.copy(hp).addScaledVector(fwd, 0.9); this.centerSign.lookAt(hp);
