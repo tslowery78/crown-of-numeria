@@ -17,12 +17,14 @@ import { GemTray } from './tray.js';
 import { MagicScroll } from './scroll.js';
 import { makeDragon } from './props.js';
 import { loadKingdomArt, makeIslandMagic, batchKingdomDragon, softenSkySeam } from './kingdom-art.js';
+import { makeFillRing } from './hands.js';
 
 const CELL = 0.2, R = 0.86, TOPY = 0.55, QUEST = 5; // metres: grid cell, island radius, island top height
 const PLAYER_Z = 1.45; // where she stands, in kingdom coordinates (the island centre is the origin)
 const VISIT = 8; // "Shrink down!": the kingdom grows 8x, so a cottage is house-sized and villagers are her height
 const PEOPLE = ['female-a', 'male-a', 'female-b', 'male-c', 'female-d', 'male-e'];
 const KEY = (player) => `mathcastle.kingdom.${player}`;
+const HOP = 8; // longest teleport hop while small, metres
 
 // ------------------------------------------------------------------ kit
 let kitPromise = null;
@@ -455,6 +457,46 @@ export class Kingdom extends Game {
     }
   }
 
+  // Pinch-to-teleport while small: pinch (or trigger) and hold to aim the hand's ray at the meadow,
+  // a ring shows where she will land, letting go jumps there. Hops are capped and kept on the island.
+  teleportTarget(ptr) {
+    const m = new THREE.Matrix4().extractRotation(ptr.c.matrixWorld), o = new THREE.Vector3().setFromMatrixPosition(ptr.c.matrixWorld);
+    const d = new THREE.Vector3(0, 0, -1).applyMatrix4(m), head = this.headPos().setY(0);
+    let p;
+    if (d.y < -0.02) p = o.clone().addScaledVector(d, -o.y / d.y); // where the ray meets the ground (the island top is at floor level)
+    else { const flat = new THREE.Vector3(d.x, 0, d.z); if (flat.lengthSq() < 1e-4) return null; p = head.clone().addScaledVector(flat.normalize(), HOP); }
+    p.y = 0;
+    const off = p.clone().sub(head); if (off.length() > HOP) p = head.clone().addScaledVector(off.normalize(), HOP);
+    const c = this.islandTop.getWorldPosition(new THREE.Vector3()).setY(0), r = R * VISIT - 0.6, v = p.clone().sub(c);
+    if (v.length() > r) p = c.add(v.setLength(r));
+    return p;
+  }
+  updateTeleport() {
+    if (!this.teleRing) { this.teleRing = makeFillRing(0.32, 0x7dff6b); this.teleRing.setProgress(1); this.teleRing.rotation.x = -Math.PI / 2; this.scene.add(this.teleRing); }
+    let show = null;
+    for (const ptr of this.pointers) {
+      if (!ptr.teleport) continue;
+      if (!ptr.src || !this.visiting) { ptr.teleport = null; continue; }
+      ptr.teleport.target = this.teleportTarget(ptr); show = ptr;
+    }
+    const tg = show?.teleport.target;
+    this.teleRing.visible = !!tg;
+    if (tg) {
+      this.teleRing.position.copy(tg).setY(0.03);
+      const o = new THREE.Vector3().setFromMatrixPosition(show.c.matrixWorld);
+      show.ray.visible = show.dot.visible = true; show.ray.scale.z = o.distanceTo(tg); show.dot.position.copy(tg);
+    }
+  }
+  finishTeleport(ptr) {
+    const tg = ptr.teleport?.target; ptr.teleport = null; if (this.teleRing) this.teleRing.visible = false;
+    if (!tg || !this.visiting) return false;
+    const head = this.headPos();
+    this.rig.position.x += tg.x - head.x; this.rig.position.z += tg.z - head.z; this.rig.updateMatrixWorld(true);
+    this.audio.pickup(tg); this.burst(tg.clone().setY(0.15), 20, 0.03, 1.5);
+    return true;
+  }
+  selectEnd(ptr) { super.selectEnd(ptr); if (ptr.teleport) this.finishTeleport(ptr); }
+
   // ------------------------------------------------------------ shop
   buildShop() {
     const shop = this.shop = { group: new THREE.Group(), slots: [] }, cols = 5, sw = 0.2, sh = 0.2;
@@ -672,6 +714,8 @@ export class Kingdom extends Game {
   select(ptr) {
     this.audio.resume();
     const h = ptr.hit;
+    // small and visiting: a pinch that isn't on a button starts aiming a teleport
+    if (this.visiting && !ptr.desktop && !this.paused && h?.type !== 'button') { ptr.teleport = { target: null }; return; }
     if (!h || ptr.holding) return;
     if (h.type === 'shop') return this.pickFromShop(ptr, h.item, true);
     if (h.type === 'building') return this.pickBuilding(ptr, h.b, true);
@@ -749,6 +793,7 @@ export class Kingdom extends Game {
     this.updateParticles(dt); this.pressFx.update(dt);
     this.handMenu.update(dt);
     this.updatePointers(dt, []);
+    this.updateTeleport();
     // ghost ring under a held building
     this.ghost.visible = false;
     for (const ptr of [...this.pointers, this.desktopPtr]) {
