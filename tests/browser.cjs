@@ -150,7 +150,10 @@ const url=process.argv[2]||'http://127.0.0.1:8765/';
   const kingdom=await page.evaluate(async()=>{
    const g=__castle,p=g.board,ptr=g.desktopPtr,r={start:g.gems,pieces:Object.keys(g.kit).length};
    p.busyUntil=0;p.input='';if(p.problem.choices)p.pressKey('choice:'+p.problem.answer);else{for(const k of p.problem.answer)p.pressKey(k);p.pressKey('OK');}
-   await new Promise(res=>setTimeout(res,2500));r.afterSolve=g.gems;
+   // the 3 gems fly in one after another; frame() caps dt at 50 ms, so on slow software GL the flight
+   // takes longer than its 1.3 s of game time. Wait for the award to land instead of a fixed sleep.
+   await new Promise(res=>setTimeout(res,2500));for(let i=0;i<300&&g.gems<r.start+3;i++)await new Promise(res=>setTimeout(res,100));
+   await new Promise(res=>setTimeout(res,500));r.afterSolve=g.gems;
    const put=(id,i,j)=>{const e=g.shop.slots.find(s=>s.item.id===id);if(!g.pickFromShop(ptr,e))return false;const c=g.cellCentre(i,j,e.item.foot||1);ptr.holding.obj.parent.remove(ptr.holding.obj);g.island.add(ptr.holding.obj);ptr.holding.obj.position.copy(c).setY(0.1);g.drop(ptr);return g.buildings.some(b=>b.id===id&&b.i===i&&b.j===j);};
    r.cottage=put('cottage',1,0);r.gemsAfterBuy=g.gems;r.onTaken=put('tree',1,0);r.onPond=put('tree',-2,-2);
    r.visibleMeshes=0;g.buildings[0].model.traverse(o=>{if(o.isMesh&&o.geometry.attributes.position.count)r.visibleMeshes++;});
